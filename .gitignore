@@ -39,3 +39,8 @@ chroma_data/
 
 # GCP
 .gcloud/
+
+# Local tools
+.claude/
+.cursor/
+.windsurf/
