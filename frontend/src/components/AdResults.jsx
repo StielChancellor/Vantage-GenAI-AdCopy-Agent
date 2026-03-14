@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, Download, CheckCircle, Clock, Coins, Cpu } from 'lucide-react';
+import { Copy, Download, CheckCircle, Clock, Coins } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function AdResults({ data }) {
@@ -46,9 +46,6 @@ export default function AdResults({ data }) {
               <Clock size={13} /> {data.time_seconds.toFixed(1)}s
             </span>
           )}
-          <span className="stat-badge model">
-            <Cpu size={13} /> {data.model_used}
-          </span>
           <button className="btn btn-sm btn-outline" onClick={downloadCSV}>
             <Download size={14} /> CSV
           </button>

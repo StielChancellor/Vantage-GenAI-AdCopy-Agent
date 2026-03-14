@@ -22,7 +22,7 @@ export default function Login() {
       if (res.data.user.role === 'admin') {
         navigate('/admin');
       } else {
-        navigate('/');
+        navigate('/dashboard');
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Login failed');
@@ -36,9 +36,9 @@ export default function Login() {
       <div className="login-card">
         <div className="login-header">
           <Zap size={32} style={{ color: '#c9a84c', marginBottom: '0.5rem' }} />
-          <h1>Vantage AdCopy</h1>
+          <h1>Vantage GenAI</h1>
           <div className="login-divider" />
-          <p>AI-Powered Ad Copy Generation</p>
+          <p>Ad Copy Agent</p>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="form-group">

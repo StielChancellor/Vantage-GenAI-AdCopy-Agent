@@ -57,6 +57,9 @@ export const uploadBrandUSP = (file) => {
 export const getAuditLogs = (limit = 100) => api.get(`/admin/audit-logs?limit=${limit}`);
 export const getUsageStats = () => api.get('/admin/usage-stats');
 
+// Admin - Export
+export const exportUsageCSV = () => api.get('/admin/export/usage', { responseType: 'blob' });
+
 // Admin - Settings
 export const getAdminSettings = () => api.get('/admin/settings');
 export const updateAdminSettings = (data) => api.put('/admin/settings', data);

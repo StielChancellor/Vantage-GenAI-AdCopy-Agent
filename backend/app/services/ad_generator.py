@@ -122,12 +122,13 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     response = model.generate_content(user_prompt)
 
     # 5. Parse response and calculate tokens
+    input_tokens = 0
+    output_tokens = 0
     tokens_used = 0
     if response.usage_metadata:
-        tokens_used = (
-            response.usage_metadata.prompt_token_count
-            + response.usage_metadata.candidates_token_count
-        )
+        input_tokens = response.usage_metadata.prompt_token_count
+        output_tokens = response.usage_metadata.candidates_token_count
+        tokens_used = input_tokens + output_tokens
 
     variants = _parse_response(response.text, request.platforms)
 
@@ -137,6 +138,8 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         hotel_name=request.hotel_name,
         variants=variants,
         tokens_used=tokens_used,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
         model_used=model_name,
         time_seconds=elapsed,
         generated_at=datetime.now(timezone.utc).isoformat(),

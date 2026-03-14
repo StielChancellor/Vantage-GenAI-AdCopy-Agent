@@ -53,6 +53,8 @@ class AdGenerationResponse(BaseModel):
     hotel_name: str
     variants: list[AdCopyOutput]
     tokens_used: int
+    input_tokens: int = 0
+    output_tokens: int = 0
     model_used: str
     time_seconds: float
     generated_at: str

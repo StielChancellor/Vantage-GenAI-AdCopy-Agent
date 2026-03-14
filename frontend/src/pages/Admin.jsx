@@ -6,10 +6,11 @@ import {
   uploadHistoricalAds, uploadBrandUSP,
   getAuditLogs, getUsageStats,
   getAdminSettings, updateAdminSettings,
+  exportUsageCSV,
   logout as apiLogout,
 } from '../services/api';
 import toast from 'react-hot-toast';
-import { LogOut, Users, Upload, Activity, ArrowLeft, Trash2, Settings } from 'lucide-react';
+import { LogOut, Users, Upload, Activity, ArrowLeft, Trash2, Settings, Download } from 'lucide-react';
 
 export default function Admin() {
   const { user, logoutUser } = useAuth();
@@ -27,7 +28,7 @@ export default function Admin() {
 
   useEffect(() => {
     if (user?.role !== 'admin') {
-      navigate('/');
+      navigate('/dashboard');
       return;
     }
     loadUsers();
@@ -109,6 +110,22 @@ export default function Admin() {
     }
   };
 
+  const handleExport = async () => {
+    try {
+      const res = await exportUsageCSV();
+      const blob = new Blob([res.data], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `usage_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Usage data exported!');
+    } catch (err) {
+      toast.error('Export failed');
+    }
+  };
+
   const handleLogout = async () => {
     try { await apiLogout(); } catch {}
     logoutUser();
@@ -119,7 +136,7 @@ export default function Admin() {
     <div className="dashboard">
       <nav className="topbar">
         <div className="topbar-brand">
-          <button className="btn btn-sm btn-outline" onClick={() => navigate('/')}>
+          <button className="btn btn-sm btn-outline" onClick={() => navigate('/dashboard')}>
             <ArrowLeft size={16} /> Back
           </button>
           <span>Admin Portal</span>
@@ -203,10 +220,15 @@ export default function Admin() {
 
         {tab === 'logs' && (
           <div className="admin-panel">
-            <h3>Usage Stats by User</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ marginBottom: 0 }}>Usage Stats by User</h3>
+              <button className="btn btn-sm btn-outline" onClick={handleExport}>
+                <Download size={14} /> Export All Usage (CSV)
+              </button>
+            </div>
             <table className="data-table">
               <thead>
-                <tr><th>Email</th><th>Logins</th><th>Generations</th><th>Total Tokens</th></tr>
+                <tr><th>Email</th><th>Logins</th><th>Generations</th><th>Total Tokens</th><th>Total Cost (INR)</th></tr>
               </thead>
               <tbody>
                 {Object.entries(stats).map(([email, s]) => (
@@ -215,27 +237,32 @@ export default function Admin() {
                     <td>{s.login_count}</td>
                     <td>{s.generations}</td>
                     <td>{s.total_tokens?.toLocaleString()}</td>
+                    <td style={{ color: 'var(--gold)' }}>{s.total_cost_inr != null ? `₹${s.total_cost_inr.toFixed(4)}` : '-'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
             <h3>Recent Audit Logs</h3>
-            <table className="data-table">
-              <thead>
-                <tr><th>Time</th><th>User</th><th>Action</th><th>Tokens</th></tr>
-              </thead>
-              <tbody>
-                {logs.map((l) => (
-                  <tr key={l.id}>
-                    <td>{new Date(l.timestamp).toLocaleString()}</td>
-                    <td>{l.user_email}</td>
-                    <td><span className={`badge badge-${l.action}`}>{l.action}</span></td>
-                    <td>{l.tokens_consumed || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr><th>Time</th><th>User</th><th>Action</th><th>Hotel</th><th>Tokens</th><th>Cost (INR)</th></tr>
+                </thead>
+                <tbody>
+                  {logs.map((l) => (
+                    <tr key={l.id}>
+                      <td style={{ whiteSpace: 'nowrap' }}>{new Date(l.timestamp).toLocaleString()}</td>
+                      <td>{l.user_email}</td>
+                      <td><span className={`badge badge-${l.action}`}>{l.action}</span></td>
+                      <td>{l.hotel_name || '-'}</td>
+                      <td>{l.tokens_consumed || '-'}</td>
+                      <td style={{ color: 'var(--gold)' }}>{l.action === 'generate' && l.cost_inr != null ? `₹${l.cost_inr.toFixed(4)}` : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 

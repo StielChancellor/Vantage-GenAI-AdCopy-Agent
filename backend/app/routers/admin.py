@@ -1,8 +1,10 @@
 import io
+import csv
 from datetime import datetime, timezone
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi.responses import StreamingResponse
 
 from backend.app.core.auth import require_admin
 from backend.app.core.database import get_firestore, get_chroma
@@ -16,6 +18,23 @@ AVAILABLE_MODELS = [
     {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
     {"id": "gemini-2.0-flash-lite", "label": "Gemini 2.0 Flash Lite"},
 ]
+
+# Cost calculation: USD per 1M tokens
+MODEL_PRICING = {
+    "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
+    "gemini-2.5-flash-lite": {"input": 0.075, "output": 0.30},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
+}
+USD_TO_INR = 85.0
+
+
+def calculate_cost_inr(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Calculate cost in INR for a generation."""
+    pricing = MODEL_PRICING.get(model, {"input": 0.15, "output": 0.60})
+    cost_usd = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+    return round(cost_usd * USD_TO_INR, 4)
+
 
 router = APIRouter()
 
@@ -144,7 +163,25 @@ async def get_audit_logs(
         .limit(limit)
         .stream()
     )
-    return [{"id": doc.id, **doc.to_dict()} for doc in docs]
+    results = []
+    for doc in docs:
+        data = doc.to_dict()
+        # Calculate cost for generation logs that don't already have it
+        if data.get("action") == "generate" and "cost_inr" not in data:
+            model = data.get("model_used", "gemini-2.5-flash")
+            input_t = data.get("input_tokens", 0)
+            output_t = data.get("output_tokens", 0)
+            if input_t == 0 and output_t == 0 and data.get("tokens_consumed", 0) > 0:
+                total = data["tokens_consumed"]
+                input_t = int(total * 0.7)
+                output_t = total - input_t
+            data["cost_inr"] = calculate_cost_inr(model, input_t, output_t)
+        # Extract hotel_name from inputs dict for older logs
+        if data.get("action") == "generate" and "hotel_name" not in data:
+            inputs = data.get("inputs", {})
+            data["hotel_name"] = inputs.get("hotel_name", "")
+        results.append({"id": doc.id, **data})
+    return results
 
 
 @router.get("/admin/usage-stats")
@@ -157,14 +194,97 @@ async def get_usage_stats(admin: dict = Depends(require_admin)):
         data = log.to_dict()
         email = data.get("user_email", "unknown")
         if email not in stats:
-            stats[email] = {"total_tokens": 0, "login_count": 0, "generations": 0}
+            stats[email] = {"total_tokens": 0, "login_count": 0, "generations": 0, "total_cost_inr": 0.0}
         if data.get("action") == "login":
             stats[email]["login_count"] += 1
         if data.get("action") == "generate":
             stats[email]["generations"] += 1
             stats[email]["total_tokens"] += data.get("tokens_consumed", 0)
+            if "cost_inr" in data:
+                stats[email]["total_cost_inr"] += data["cost_inr"]
+            else:
+                model = data.get("model_used", "gemini-2.5-flash")
+                input_t = data.get("input_tokens", 0)
+                output_t = data.get("output_tokens", 0)
+                if input_t == 0 and output_t == 0 and data.get("tokens_consumed", 0) > 0:
+                    total = data["tokens_consumed"]
+                    input_t = int(total * 0.7)
+                    output_t = total - input_t
+                stats[email]["total_cost_inr"] += calculate_cost_inr(model, input_t, output_t)
+
+    for email in stats:
+        stats[email]["total_cost_inr"] = round(stats[email]["total_cost_inr"], 4)
 
     return stats
+
+
+# ── Export ───────────────────────────────────────────
+@router.get("/admin/export/usage")
+async def export_usage_csv(admin: dict = Depends(require_admin)):
+    """Export all generation audit logs as a downloadable CSV."""
+    db = get_firestore()
+    docs = (
+        db.collection("audit_logs")
+        .order_by("timestamp", direction="DESCENDING")
+        .stream()
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Timestamp", "User Email", "Hotel Name", "Offer Name",
+        "Platforms", "Inclusions", "Campaign Objective", "Reference URLs",
+        "Total Tokens", "Input Tokens", "Output Tokens",
+        "Model Used", "Cost (INR)", "Time (seconds)"
+    ])
+
+    for doc in docs:
+        data = doc.to_dict()
+        if data.get("action") != "generate":
+            continue
+
+        model = data.get("model_used", "gemini-2.5-flash")
+        input_t = data.get("input_tokens", 0)
+        output_t = data.get("output_tokens", 0)
+        if input_t == 0 and output_t == 0 and data.get("tokens_consumed", 0) > 0:
+            total = data["tokens_consumed"]
+            input_t = int(total * 0.7)
+            output_t = total - input_t
+
+        cost = data.get("cost_inr", calculate_cost_inr(model, input_t, output_t))
+
+        inputs = data.get("inputs", {})
+        hotel_name = data.get("hotel_name", inputs.get("hotel_name", ""))
+        offer_name = data.get("offer_name", inputs.get("offer_name", ""))
+        platforms = data.get("platforms", inputs.get("platforms", []))
+        inclusions = data.get("inclusions", inputs.get("inclusions", ""))
+        objective = data.get("campaign_objective", inputs.get("campaign_objective", ""))
+        ref_urls = data.get("reference_urls", inputs.get("reference_urls", inputs.get("reference_url", "")))
+
+        writer.writerow([
+            data.get("timestamp", ""),
+            data.get("user_email", ""),
+            hotel_name,
+            offer_name,
+            ", ".join(platforms) if isinstance(platforms, list) else str(platforms),
+            inclusions,
+            objective,
+            ", ".join(ref_urls) if isinstance(ref_urls, list) else str(ref_urls),
+            data.get("tokens_consumed", 0),
+            input_t,
+            output_t,
+            model,
+            f"{cost:.4f}",
+            data.get("time_seconds", ""),
+        ])
+
+    output.seek(0)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=usage_export_{timestamp}.csv"},
+    )
 
 
 # ── Settings ────────────────────────────────────────

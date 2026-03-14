@@ -123,7 +123,7 @@ export default function Dashboard() {
       <nav className="topbar">
         <div className="topbar-brand">
           <Zap size={20} />
-          <span>Vantage AdCopy</span>
+          <span>Vantage GenAI</span>
         </div>
         <div className="topbar-user">
           <span>{user?.full_name}</span>
