@@ -38,13 +38,18 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
 
 - **AI-Powered Ad Copy** - Generates optimized ad copy using Google Gemini with context-aware prompts
 - **RAG Pipeline** - Retrieves top-performing historical ads via ChromaDB vector search to inform new generations
-- **Multi-Platform Output** - Produces copy for Google Search, Meta Carousel, Performance Max, and YouTube simultaneously
+- **Multi-Platform Output** - Produces copy for Google Search, FB Single Image, FB Carousel, FB Video, Performance Max, and YouTube simultaneously
+- **URL Autocomplete** - Bare domain entry (auto-prepends `https://`), tag-based multi-URL input with history suggestions from previous generations
+- **Google Places Autocomplete** - Search hotels by name, view ratings and review counts, add multiple Google listings with tag-based selection
+- **Facebook Ad Types** - Three distinct Facebook formats with platform-specific character limits: Single Image, Carousel, and Video
+- **Carousel Card Flow** - Two modes: AI-suggested card visuals (with index-aligned headlines) or manual card descriptions (2-10 cards)
+- **Post-Generation Refinement** - Feedback loop to refine generated ad copy with specific instructions, accumulated token/time tracking
 - **Web Scraping** - Crawls hotel reference URLs (1-level deep) to extract property details, amenities, and USPs
-- **Google Reviews Integration** - Pulls 4-5 star reviews from Google Places API, with AI-summarized insights
+- **Google Reviews Integration** - Pulls 4-5 star reviews from Google Places API, with AI-summarized insights. Supports multiple listings
 - **Brand Guardrails** - Enforces positive/negative/restricted keywords from uploaded brand USP sheets
 - **Interactive Landing Page** - Animated canvas-based landing with wave effects, particles, and mouse-following spotlight
 - **Admin Dashboard** - User management, CSV uploads, audit logs, usage statistics, model selection, and CSV export
-- **Cost Tracking** - Per-generation token usage and cost in INR with exportable reports
+- **Cost Tracking** - Per-generation and per-refinement token usage and cost in INR with exportable reports
 - **JWT Authentication** - Secure role-based access (admin/user) with session tracking
 - **Scale-to-Zero Deployment** - Runs on Google Cloud Run with automatic scaling (0-5 instances)
 
@@ -79,12 +84,13 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
 ```
 
 **Data Flow:**
-1. User submits hotel details, reference URLs, and target platforms
-2. Backend scrapes reference URLs and fetches Google Reviews
+1. User submits hotel details, reference URLs (with autocomplete), Google listings (via Places search), and target platforms
+2. Backend scrapes reference URLs and fetches Google Reviews from selected listings
 3. RAG engine retrieves top-performing historical ads from ChromaDB
 4. Brand USPs and guardrails are loaded from Firestore
-5. All context is assembled into a structured prompt for Gemini AI
+5. All context is assembled into a structured prompt for Gemini AI (with carousel alignment rules if applicable)
 6. Generated ad copy is parsed, logged with cost metrics, and returned to the frontend
+7. User can optionally refine results via feedback — tokens and time accumulate across refinement cycles
 
 ---
 
@@ -122,7 +128,8 @@ Vantage-GenAI-AdCopy-Agent/
 │   │   │   ├── health.py           # Health check endpoint
 │   │   │   ├── auth.py             # Login, logout, current user
 │   │   │   ├── admin.py            # User CRUD, CSV uploads, audit, export
-│   │   │   └── generate.py         # Ad generation endpoint + cost logging
+│   │   │   ├── generate.py         # Ad generation, refinement + cost logging
+│   │   │   └── places.py           # Google Places autocomplete proxy
 │   │   └── services/
 │   │       ├── ad_generator.py     # Main generation pipeline (RAG + AI)
 │   │       ├── rag_engine.py       # ChromaDB retrieval & brand USP lookup
@@ -147,7 +154,7 @@ Vantage-GenAI-AdCopy-Agent/
 │   │   │   ├── Dashboard.jsx       # Ad generation interface
 │   │   │   └── Admin.jsx           # Admin panel (5 tabs)
 │   │   ├── components/
-│   │   │   ├── AdResults.jsx       # Ad copy display, copy & CSV export
+│   │   │   ├── AdResults.jsx       # Ad copy display, carousel cards, refinement UI
 │   │   │   └── GenerationProgress.jsx  # Animated step-by-step progress
 │   │   ├── hooks/
 │   │   │   └── useAuth.jsx         # Auth context & state management
@@ -334,6 +341,9 @@ Interactive API documentation is available at:
 | POST   | `/api/v1/auth/logout`             | JWT    | Logout (audit logging)                   |
 | GET    | `/api/v1/auth/me`                 | JWT    | Get current user info                    |
 | POST   | `/api/v1/generate`                | JWT    | Generate ad copy                         |
+| POST   | `/api/v1/generate/refine`         | JWT    | Refine ad copy with user feedback        |
+| GET    | `/api/v1/generate/url-suggestions`| JWT    | URL autocomplete from generation history |
+| GET    | `/api/v1/places/autocomplete`     | JWT    | Google Places autocomplete search        |
 | POST   | `/api/v1/admin/users`             | Admin  | Create a new user                        |
 | GET    | `/api/v1/admin/users`             | Admin  | List all users                           |
 | PUT    | `/api/v1/admin/users/{id}`        | Admin  | Update a user                            |
@@ -367,13 +377,15 @@ The generation process follows a multi-stage pipeline:
    Maximum 5 subpages per URL, 8000 chars total output.
 
 4. GOOGLE REVIEWS
-   If a Google Listing URL is provided, fetch place details via Places API.
-   Filter to 4-5 star reviews only. AI summarizes themes, amenities praised,
-   emotional keywords, and unique selling points.
+   If Google Listing(s) are provided, fetch place details via Places API.
+   Supports multiple listings. Filter to 4-5 star reviews only. AI summarizes
+   themes, amenities praised, emotional keywords, and unique selling points.
 
 5. PROMPT ASSEMBLY
    Build a structured system prompt with brand restrictions and a user prompt
    with all gathered context (scraped content, reviews, historical ads, USPs).
+   For FB Carousel: include carousel card context (AI-suggest or manual mode)
+   with strict index alignment between visuals, headlines, and descriptions.
 
 6. AI GENERATION
    Call Google Gemini with platform-specific character limits and format
@@ -382,18 +394,30 @@ The generation process follows a multi-stage pipeline:
 7. COST CALCULATION & AUDIT
    Calculate cost in INR based on input/output token usage and model pricing.
    Log complete audit entry to Firestore with all inputs and metrics.
+
+8. REFINEMENT (optional, repeatable)
+   User submits feedback on generated copy. The tool applies changes while
+   maintaining character limits and index alignment. Tokens and time accumulate
+   across refinement cycles. Each refinement is logged in audit trail.
 ```
 
 ---
 
 ## Supported Ad Platforms
 
-| Platform         | Headlines        | Descriptions      | Captions          |
-|------------------|------------------|--------------------|-------------------|
-| **Google Search**    | 15 (30 chars each) | 4 (90 chars each)   | -                 |
-| **Meta Carousel**    | 5 (40 chars each)  | 5 (125 chars each)  | 5 (2200 chars each)|
-| **Performance Max**  | 15 (30 chars each) | 5 (90 chars each)   | -                 |
-| **YouTube**          | 5 (40 chars each)  | 5 (90 chars each)   | 1 (150 chars)     |
+| Platform              | Headlines              | Descriptions / Primary Text     | Captions / Primary Text |
+|-----------------------|------------------------|---------------------------------|-------------------------|
+| **Google Search**     | 15 × 30 chars          | 4 × 90 chars                    | -                       |
+| **FB Single Image**   | 5 × 27 chars           | 5 × 50-150 chars (Primary Text) | -                       |
+| **FB Carousel**       | 5 × 45 chars (per card)| 5 × 18 chars (per card)         | 1 × 80 chars (Primary Text) |
+| **FB Video**          | 5 × 27 chars           | 5 × 50-150 chars (Primary Text) | -                       |
+| **Performance Max**   | 15 × 30 chars          | 5 × 90 chars                    | -                       |
+| **YouTube**           | 5 × 40 chars           | 5 × 90 chars                    | 1 × 150 chars           |
+
+### FB Carousel Card Modes
+
+- **Suggest Mode** (default): AI recommends card visuals and generates matching headlines/descriptions aligned by index
+- **Manual Mode**: User provides descriptions for each card (2-10 cards), AI writes headlines/descriptions matching each card's content
 
 ---
 
