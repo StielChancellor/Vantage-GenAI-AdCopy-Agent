@@ -1,7 +1,7 @@
 """Ad copy generation endpoint."""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from backend.app.core.auth import get_current_user
 from backend.app.core.database import get_firestore
@@ -16,7 +16,16 @@ async def generate_ads(
     body: AdGenerationRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    result = await generate_ad_copy(body)
+    try:
+        result = await generate_ad_copy(body)
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg or "quota" in error_msg.lower():
+            raise HTTPException(
+                status_code=429,
+                detail="Gemini API quota exceeded. Please try again later or upgrade your plan.",
+            )
+        raise HTTPException(status_code=500, detail=f"Generation failed: {error_msg[:200]}")
 
     # Audit log
     db = get_firestore()

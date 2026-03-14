@@ -1,5 +1,18 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+# Look for .env in backend/ directory or project root
+_ENV_FILE = None
+for candidate in [
+    Path(__file__).resolve().parent.parent.parent / ".env",  # backend/.env
+    Path.cwd() / ".env",  # project root .env
+    Path.cwd() / "backend" / ".env",  # project root -> backend/.env
+]:
+    if candidate.exists():
+        _ENV_FILE = str(candidate)
+        break
 
 
 class Settings(BaseSettings):
@@ -33,7 +46,7 @@ class Settings(BaseSettings):
     # Cache
     REVIEW_CACHE_DAYS: int = 30
 
-    model_config = {"env_file": ".env", "extra": "ignore"}
+    model_config = {"env_file": _ENV_FILE, "extra": "ignore"}
 
 
 @lru_cache()
