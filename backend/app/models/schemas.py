@@ -39,7 +39,7 @@ class AdGenerationRequest(BaseModel):
     google_listing_url: str
     other_info: Optional[str] = ""
     campaign_objective: Optional[str] = ""  # Awareness | Consideration | Conversion | ""
-    model_name: str = "gemini-2.0-flash"
+    model_name: str = "gemini-2.5-flash"
     platforms: list[str] = ["google_search"]  # google_search, meta_carousel, pmax, youtube
 
 

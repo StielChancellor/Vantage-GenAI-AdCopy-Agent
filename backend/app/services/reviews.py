@@ -115,7 +115,7 @@ async def fetch_google_reviews(google_listing_url: str, hotel_name: str) -> dict
 async def _extract_review_insights(review_text: str, hotel_name: str) -> str:
     """Use Gemini Flash to extract key insights from reviews."""
     genai.configure(api_key=settings.GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     prompt = f"""Analyze these guest reviews for {hotel_name} and extract:
 1. Top 5 positive themes/highlights guests mention

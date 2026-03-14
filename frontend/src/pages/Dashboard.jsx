@@ -15,10 +15,10 @@ const PLATFORMS = [
 ];
 
 const MODELS = [
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
   { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite' },
-  { id: 'gemini-2.5-flash-preview-05-20', label: 'Gemini 2.5 Flash' },
-  { id: 'gemini-2.5-pro-preview-05-06', label: 'Gemini 2.5 Pro' },
 ];
 
 const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
@@ -34,7 +34,7 @@ export default function Dashboard() {
     google_listing_url: '',
     other_info: '',
     campaign_objective: '',
-    model_name: 'gemini-2.0-flash',
+    model_name: 'gemini-2.5-flash',
     platforms: ['google_search'],
   });
   const [loading, setLoading] = useState(false);
