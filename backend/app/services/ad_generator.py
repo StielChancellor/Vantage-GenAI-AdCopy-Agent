@@ -194,6 +194,9 @@ RULES:
 - Maintain all character limits from the original generation.
 - Only change what the feedback requests. Keep everything else intact.
 - Every headline and description must still be unique.
+- CRITICAL for fb_carousel: Each card_suggestion[i], headline[i], and description[i] MUST correspond to the same card.
+  If you change a headline, ensure its card_suggestion still matches, and vice versa.
+  card_suggestions[0] = visual for Card 1, headlines[0] = headline for Card 1, descriptions[0] = description for Card 1.
 - Output ONLY valid JSON matching the same format as the input."""
 
     # Build platform specs reminder
@@ -226,7 +229,8 @@ RULES:
 {request.feedback}
 
 ## INSTRUCTIONS:
-Apply the feedback to the ad copy above. Return the FULL updated JSON array (all platforms, all headlines/descriptions/captions), not just the changed items. Maintain the same structure.
+Apply the feedback to the ad copy above. Return the FULL updated JSON array (all platforms, all headlines/descriptions/captions/card_suggestions), not just the changed items. Maintain the same structure.
+For fb_carousel: ensure card_suggestions[i] always matches headlines[i] and descriptions[i] (same card index).
 
 ```json
 [
@@ -234,7 +238,8 @@ Apply the feedback to the ad copy above. Return the FULL updated JSON array (all
     "platform": "platform_name",
     "headlines": ["headline1", ...],
     "descriptions": ["desc1", ...],
-    "captions": ["caption1", ...]
+    "captions": ["caption1", ...],
+    "card_suggestions": ["visual for card matching headline1", ...]
   }}
 ]
 ```"""
@@ -330,16 +335,31 @@ def _build_user_prompt(
             for i, card_desc in enumerate(request.carousel_cards):
                 if card_desc.strip():
                     carousel_context += f"  Card {i+1}: {card_desc}\n"
-            carousel_context += "\nWrite card headlines and descriptions that match these specific card visuals/content.\n"
+            carousel_context += """
+CRITICAL: Each card headline and description MUST match its corresponding card visual above.
+- headlines[0] and descriptions[0] MUST be written specifically for Card 1's visual/content.
+- headlines[1] and descriptions[1] MUST be written specifically for Card 2's visual/content.
+- And so on for each card.
+The headline and description for each card should directly reflect what is shown in that card's image/video.
+"""
         else:
             carousel_context = """
 
 ## CAROUSEL FLOW SUGGESTION:
 For the Facebook Carousel, also generate a "card_suggestions" array with one-line recommendations
 per card describing what image/video should be shown on each card. Base suggestions on the hotel details and offer.
-Example format in the JSON output for fb_carousel:
-  "card_suggestions": ["Hotel facade with a model walking towards the entrance", "Aerial view of the infinity pool at sunset", ...]
-Generate 5 card suggestions."""
+
+CRITICAL ALIGNMENT RULE: Each card_suggestion MUST correspond to the headline and description at the SAME index.
+- card_suggestions[0] describes the visual for Card 1, and headlines[0] + descriptions[0] must match that visual.
+- card_suggestions[1] describes the visual for Card 2, and headlines[1] + descriptions[1] must match that visual.
+- And so on for each card.
+First decide the visual story flow for the carousel (what each card should show), then write the matching headline
+and description for each card based on that visual.
+
+Example: If card_suggestions[0] = "Hotel facade with a model walking towards the entrance", then headlines[0]
+should be about arrival/welcome, NOT about spa or dining.
+
+Generate exactly 5 card suggestions, 5 matching headlines, and 5 matching descriptions — all aligned by index."""
 
     # Historical ad context
     historical_context = ""

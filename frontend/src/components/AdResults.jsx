@@ -73,33 +73,26 @@ export default function AdResults({ data, form, onRefine, refining }) {
         </div>
       )}
 
-      {/* Carousel Cards - grouped */}
+      {/* Carousel Cards - grouped with headline + description + visual suggestion per card */}
       <div className="ad-group">
         <h4>Carousel Cards</h4>
         {variant.headlines.map((h, i) => (
           <div key={`card-${vi}-${i}`} className="carousel-card-group">
             <div className="card-label">Card {i + 1}</div>
+            {variant.card_suggestions && variant.card_suggestions[i] && (
+              <div className="ad-item card-suggestion">
+                <span className="ad-index">🖼</span>
+                <span className="ad-text">{variant.card_suggestions[i]}</span>
+                <button className="btn-icon" onClick={() => copyToClipboard(variant.card_suggestions[i], `cs-${vi}-${i}`)}>
+                  {copiedId === `cs-${vi}-${i}` ? <CheckCircle size={14} /> : <Copy size={14} />}
+                </button>
+              </div>
+            )}
             {renderAdItem(h, `ch-${vi}-${i}`, 'H')}
             {variant.descriptions[i] && renderAdItem(variant.descriptions[i], `cd-${vi}-${i}`, 'D')}
           </div>
         ))}
       </div>
-
-      {/* Card suggestions (AI-generated) */}
-      {variant.card_suggestions && variant.card_suggestions.length > 0 && (
-        <div className="ad-group">
-          <h4>Suggested Card Visuals</h4>
-          {variant.card_suggestions.map((s, i) => (
-            <div key={`cs-${vi}-${i}`} className="ad-item card-suggestion">
-              <span className="ad-index">{i + 1}</span>
-              <span className="ad-text">{s}</span>
-              <button className="btn-icon" onClick={() => copyToClipboard(s, `cs-${vi}-${i}`)}>
-                {copiedId === `cs-${vi}-${i}` ? <CheckCircle size={14} /> : <Copy size={14} />}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 

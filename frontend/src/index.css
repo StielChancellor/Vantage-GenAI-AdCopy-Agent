@@ -610,6 +610,18 @@ label {
 }
 .card-suggestion {
   border-left: 2px solid var(--gold);
+  background: rgba(201, 168, 76, 0.06);
+  border-radius: 6px;
+}
+.card-suggestion .ad-index {
+  font-size: 0.85rem;
+  min-width: auto;
+  padding: 0 0.15rem;
+}
+.card-suggestion .ad-text {
+  font-style: italic;
+  color: var(--gold-light);
+  font-size: 0.78rem;
 }
 
 /* ── Refinement Badge ───────────────────────────── */
