@@ -36,10 +36,14 @@ class AdGenerationRequest(BaseModel):
     offer_name: str
     inclusions: str
     reference_urls: list[str]  # Multiple URLs supported
-    google_listing_url: Optional[str] = ""  # Now optional
+    google_listing_url: Optional[str] = ""  # Backward compat
+    google_listing_urls: list[str] = []  # Multiple Google listing URLs
     other_info: Optional[str] = ""
     campaign_objective: Optional[str] = ""  # Awareness | Consideration | Conversion | ""
-    platforms: list[str] = ["google_search"]  # google_search, meta_carousel, pmax, youtube
+    platforms: list[str] = ["google_search"]
+    # Carousel card configuration
+    carousel_mode: Optional[str] = "suggest"  # "suggest" or "manual"
+    carousel_cards: Optional[list[str]] = None  # User-provided card descriptions
 
 
 class AdCopyOutput(BaseModel):
@@ -47,6 +51,7 @@ class AdCopyOutput(BaseModel):
     headlines: list[str]
     descriptions: list[str]
     captions: Optional[list[str]] = None
+    card_suggestions: Optional[list[str]] = None  # AI-suggested card visual descriptions
 
 
 class AdGenerationResponse(BaseModel):
@@ -58,6 +63,32 @@ class AdGenerationResponse(BaseModel):
     model_used: str
     time_seconds: float
     generated_at: str
+
+
+# ── Ad Refinement ───────────────────────────────────
+class AdRefinementRequest(BaseModel):
+    hotel_name: str
+    offer_name: str
+    inclusions: str
+    platforms: list[str]
+    campaign_objective: Optional[str] = ""
+    other_info: Optional[str] = ""
+    previous_variants: list[AdCopyOutput]
+    feedback: str
+    accumulated_tokens: int = 0
+    accumulated_time: float = 0.0
+
+
+class AdRefinementResponse(BaseModel):
+    hotel_name: str
+    variants: list[AdCopyOutput]
+    tokens_used: int  # Total accumulated
+    input_tokens: int = 0  # This call only
+    output_tokens: int = 0  # This call only
+    model_used: str
+    time_seconds: float  # Total accumulated
+    generated_at: str
+    refinement_count: int = 1
 
 
 # ── Brand & USP ──────────────────────────────────────

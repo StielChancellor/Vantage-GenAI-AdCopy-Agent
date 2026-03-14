@@ -511,8 +511,151 @@ label {
 .ad-text { flex: 1; }
 .char-count { color: var(--text-muted); font-size: 0.7rem; white-space: nowrap; }
 
+/* ── Autocomplete Dropdown ───────────────────────── */
+.autocomplete-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 50;
+  box-shadow: var(--shadow-card);
+  animation: slideDown 0.2s ease;
+}
+.autocomplete-item {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  border-bottom: 1px solid var(--border);
+}
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item:hover {
+  background: var(--gold-glow);
+  color: var(--gold-light);
+}
+.autocomplete-item.place-item { padding: 0.6rem 0.75rem; }
+.place-name { font-size: 0.85rem; font-weight: 500; color: var(--text); }
+.place-meta { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+
+/* ── Carousel Config ────────────────────────────── */
+.carousel-config {
+  padding: 0.75rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--text-dim);
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.radio-label:hover { color: var(--text); }
+.radio-label input[type="radio"] { accent-color: var(--gold); width: auto; }
+.carousel-cards-input {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.card-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.card-input-row input {
+  flex: 1;
+}
+.card-number {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--gold);
+  min-width: 48px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Carousel Card Display ──────────────────────── */
+.carousel-card-group {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(201, 168, 76, 0.03);
+}
+.card-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
+}
+.card-suggestion {
+  border-left: 2px solid var(--gold);
+}
+
+/* ── Refinement Badge ───────────────────────────── */
+.stat-badge.refinement {
+  background: rgba(139, 92, 246, 0.12);
+  color: #c4b5fd;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+/* ── Feedback / Refinement Section ──────────────── */
+.feedback-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.feedback-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--gold);
+}
+.feedback-header h4 {
+  margin-bottom: 0;
+  color: var(--gold);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.9rem;
+}
+.feedback-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+.feedback-form textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 60px;
+}
+.feedback-form .btn {
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
 /* ── Checkbox Grid ───────────────────────────────── */
-.checkbox-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+.checkbox-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.4rem; }
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -800,7 +943,7 @@ label {
   .topbar-user span { display: none; }
 
   .form-row { grid-template-columns: 1fr; }
-  .checkbox-grid { grid-template-columns: 1fr; }
+  .checkbox-grid { grid-template-columns: 1fr 1fr; }
 
   .login-card { padding: 1.75rem; margin: 0.5rem; }
   h1 { font-size: 1.6rem; }

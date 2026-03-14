@@ -10,7 +10,10 @@ from backend.app.core.database import get_firestore
 from backend.app.services.rag_engine import retrieve_top_ads, get_brand_usps
 from backend.app.services.scraper import scrape_hotel_page
 from backend.app.services.reviews import fetch_google_reviews
-from backend.app.models.schemas import AdGenerationRequest, AdGenerationResponse, AdCopyOutput
+from backend.app.models.schemas import (
+    AdGenerationRequest, AdGenerationResponse, AdCopyOutput,
+    AdRefinementRequest,
+)
 
 settings = get_settings()
 
@@ -21,11 +24,21 @@ PLATFORM_SPECS = {
         "headlines": {"count": 15, "max_chars": 30},
         "descriptions": {"count": 4, "max_chars": 90},
     },
-    "meta_carousel": {
-        "name": "Meta Carousel Ads",
-        "headlines": {"count": 5, "max_chars": 40},
-        "descriptions": {"count": 5, "max_chars": 125},
-        "captions": {"count": 5, "max_chars": 2200},
+    "fb_single_image": {
+        "name": "Facebook Single Image Ad",
+        "headlines": {"count": 5, "max_chars": 27},
+        "descriptions": {"count": 5, "max_chars": 150, "min_chars": 50, "label": "Primary Text"},
+    },
+    "fb_carousel": {
+        "name": "Facebook Carousel Ad",
+        "headlines": {"count": 5, "max_chars": 45, "label": "Card Headlines"},
+        "descriptions": {"count": 5, "max_chars": 18, "label": "Card Descriptions"},
+        "captions": {"count": 1, "max_chars": 80, "label": "Primary Text"},
+    },
+    "fb_video": {
+        "name": "Facebook Video Ad",
+        "headlines": {"count": 5, "max_chars": 27},
+        "descriptions": {"count": 5, "max_chars": 150, "min_chars": 50, "label": "Primary Text"},
     },
     "pmax": {
         "name": "Performance Max",
@@ -91,15 +104,22 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         "urls_scraped": len(scraped_contents),
     }
 
-    # Google Reviews insights (only if URL provided)
+    # Google Reviews insights (support multiple listing URLs)
     review_data = {}
-    if request.google_listing_url and request.google_listing_url.strip():
+    listing_urls = request.google_listing_urls or (
+        [request.google_listing_url] if request.google_listing_url and request.google_listing_url.strip() else []
+    )
+    for listing_url in listing_urls:
+        if not listing_url or not listing_url.strip():
+            continue
         try:
-            review_data = await fetch_google_reviews(
-                request.google_listing_url, request.hotel_name
-            )
+            rd = await fetch_google_reviews(listing_url, request.hotel_name)
+            if not review_data or rd.get("review_count", 0) > review_data.get("review_count", 0):
+                review_data = rd  # Keep the richest review data
         except Exception:
-            review_data = {"insights": "No review data available.", "review_count": 0}
+            pass
+    if not review_data and listing_urls:
+        review_data = {"insights": "No review data available.", "review_count": 0}
 
     # 2. Build the system prompt with guardrails
     system_prompt = _build_system_prompt(brand_data)
@@ -146,10 +166,105 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     )
 
 
+async def refine_ad_copy(request: AdRefinementRequest) -> dict:
+    """Refine ad copy based on user feedback."""
+    start_time = time.time()
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+    model_name = _get_admin_model()
+
+    # Build the previous output as context
+    previous_output_str = json.dumps(
+        [
+            {
+                "platform": v.platform,
+                "headlines": v.headlines,
+                "descriptions": v.descriptions,
+                "captions": v.captions,
+                "card_suggestions": v.card_suggestions,
+            }
+            for v in request.previous_variants
+        ],
+        indent=2,
+    )
+
+    system_prompt = """You are an expert hotel advertising copywriter. You are refining previously generated ad copy based on user feedback.
+
+RULES:
+- Apply the user's feedback precisely.
+- Maintain all character limits from the original generation.
+- Only change what the feedback requests. Keep everything else intact.
+- Every headline and description must still be unique.
+- Output ONLY valid JSON matching the same format as the input."""
+
+    # Build platform specs reminder
+    platform_specs_str = ""
+    for p in request.platforms:
+        spec = PLATFORM_SPECS.get(p, {})
+        if spec:
+            h_label = spec["headlines"].get("label", "Headlines")
+            d_label = spec["descriptions"].get("label", "Descriptions")
+            platform_specs_str += f"\n{spec['name']}: {h_label} max {spec['headlines']['max_chars']} chars"
+            platform_specs_str += f", {d_label} max {spec['descriptions']['max_chars']} chars"
+            if "captions" in spec:
+                c_label = spec["captions"].get("label", "Captions")
+                platform_specs_str += f", {c_label} max {spec['captions']['max_chars']} chars"
+
+    user_prompt = f"""## CONTEXT:
+- Hotel: {request.hotel_name}
+- Offer: {request.offer_name}
+- Inclusions: {request.inclusions}
+{f'- Additional Info: {request.other_info}' if request.other_info else ''}
+
+## CHARACTER LIMITS REMINDER:{platform_specs_str}
+
+## PREVIOUS GENERATED AD COPY:
+```json
+{previous_output_str}
+```
+
+## USER FEEDBACK:
+{request.feedback}
+
+## INSTRUCTIONS:
+Apply the feedback to the ad copy above. Return the FULL updated JSON array (all platforms, all headlines/descriptions/captions), not just the changed items. Maintain the same structure.
+
+```json
+[
+  {{
+    "platform": "platform_name",
+    "headlines": ["headline1", ...],
+    "descriptions": ["desc1", ...],
+    "captions": ["caption1", ...]
+  }}
+]
+```"""
+
+    model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
+    response = model.generate_content(user_prompt)
+
+    input_tokens = 0
+    output_tokens = 0
+    if response.usage_metadata:
+        input_tokens = response.usage_metadata.prompt_token_count
+        output_tokens = response.usage_metadata.candidates_token_count
+
+    variants = _parse_response(response.text, request.platforms)
+    elapsed = round(time.time() - start_time, 2)
+
+    return {
+        "variants": variants,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "tokens_used": input_tokens + output_tokens,
+        "model_used": model_name,
+        "time_seconds": elapsed,
+    }
+
+
 def _build_system_prompt(brand_data: dict | None) -> str:
     """Build system prompt with brand guardrails and restricted keywords."""
     base = """You are an expert hotel advertising copywriter. You create high-converting ad copy
-for hotel campaigns across Google, Meta, and YouTube platforms.
+for hotel campaigns across Google, Meta/Facebook, and YouTube platforms.
 
 RULES:
 - Always follow the exact character limits specified for each platform.
@@ -195,11 +310,36 @@ def _build_user_prompt(
         spec = PLATFORM_SPECS.get(p, {})
         if spec:
             lines = [f"\n### {spec['name']}"]
-            lines.append(f"- Headlines: {spec['headlines']['count']}x, max {spec['headlines']['max_chars']} chars each")
-            lines.append(f"- Descriptions: {spec['descriptions']['count']}x, max {spec['descriptions']['max_chars']} chars each")
+            h_label = spec["headlines"].get("label", "Headlines")
+            d_label = spec["descriptions"].get("label", "Descriptions")
+            lines.append(f"- {h_label}: {spec['headlines']['count']}x, max {spec['headlines']['max_chars']} chars each")
+            d_line = f"- {d_label}: {spec['descriptions']['count']}x, max {spec['descriptions']['max_chars']} chars each"
+            if spec["descriptions"].get("min_chars"):
+                d_line += f", min {spec['descriptions']['min_chars']} chars each"
+            lines.append(d_line)
             if "captions" in spec:
-                lines.append(f"- Captions: {spec['captions']['count']}x, max {spec['captions']['max_chars']} chars each")
+                c_label = spec["captions"].get("label", "Captions")
+                lines.append(f"- {c_label}: {spec['captions']['count']}x, max {spec['captions']['max_chars']} chars each")
             platform_instructions.append("\n".join(lines))
+
+    # Carousel card context
+    carousel_context = ""
+    if "fb_carousel" in request.platforms:
+        if request.carousel_mode == "manual" and request.carousel_cards:
+            carousel_context = "\n\n## CAROUSEL CARD DETAILS (user-provided descriptions for each card):\n"
+            for i, card_desc in enumerate(request.carousel_cards):
+                if card_desc.strip():
+                    carousel_context += f"  Card {i+1}: {card_desc}\n"
+            carousel_context += "\nWrite card headlines and descriptions that match these specific card visuals/content.\n"
+        else:
+            carousel_context = """
+
+## CAROUSEL FLOW SUGGESTION:
+For the Facebook Carousel, also generate a "card_suggestions" array with one-line recommendations
+per card describing what image/video should be shown on each card. Base suggestions on the hotel details and offer.
+Example format in the JSON output for fb_carousel:
+  "card_suggestions": ["Hotel facade with a model walking towards the entrance", "Aerial view of the infinity pool at sunset", ...]
+Generate 5 card suggestions."""
 
     # Historical ad context
     historical_context = ""
@@ -245,6 +385,7 @@ def _build_user_prompt(
 
 ## PLATFORM REQUIREMENTS:
 {"".join(platform_instructions)}
+{carousel_context}
 {historical_context}
 {usp_context}
 {review_context}
@@ -297,6 +438,7 @@ def _parse_response(response_text: str, platforms: list[str]) -> list[AdCopyOutp
                 headlines=item.get("headlines", []),
                 descriptions=item.get("descriptions", []),
                 captions=item.get("captions"),
+                card_suggestions=item.get("card_suggestions"),
             )
         )
     return variants

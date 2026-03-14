@@ -66,5 +66,10 @@ export const updateAdminSettings = (data) => api.put('/admin/settings', data);
 
 // Generate
 export const generateAds = (data) => api.post('/generate', data);
+export const refineAds = (data) => api.post('/generate/refine', data);
+export const getUrlSuggestions = (query) => api.get(`/generate/url-suggestions?query=${encodeURIComponent(query)}`);
+
+// Places
+export const placesAutocomplete = (query) => api.get(`/places/autocomplete?query=${encodeURIComponent(query)}`);
 
 export default api;
