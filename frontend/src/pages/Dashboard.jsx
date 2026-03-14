@@ -3,7 +3,8 @@ import { useAuth } from '../hooks/useAuth';
 import { generateAds } from '../services/api';
 import toast from 'react-hot-toast';
 import AdResults from '../components/AdResults';
-import { LogOut, Zap } from 'lucide-react';
+import GenerationProgress from '../components/GenerationProgress';
+import { LogOut, Zap, X } from 'lucide-react';
 import { logout as apiLogout } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
@@ -12,13 +13,6 @@ const PLATFORMS = [
   { id: 'meta_carousel', label: 'Meta Carousel' },
   { id: 'pmax', label: 'Performance Max' },
   { id: 'youtube', label: 'YouTube' },
-];
-
-const MODELS = [
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-  { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite' },
 ];
 
 const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
@@ -30,13 +24,13 @@ export default function Dashboard() {
     hotel_name: '',
     offer_name: '',
     inclusions: '',
-    reference_url: '',
+    reference_urls: [],
     google_listing_url: '',
     other_info: '',
     campaign_objective: '',
-    model_name: 'gemini-2.5-flash',
     platforms: ['google_search'],
   });
+  const [urlInput, setUrlInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -53,8 +47,52 @@ export default function Dashboard() {
     }));
   };
 
+  // Multi-URL tag handlers
+  const addUrl = (url) => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    // Basic URL validation
+    try {
+      new URL(trimmed);
+    } catch {
+      toast.error('Please enter a valid URL');
+      return;
+    }
+    if (form.reference_urls.includes(trimmed)) {
+      toast.error('URL already added');
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      reference_urls: [...prev.reference_urls, trimmed],
+    }));
+    setUrlInput('');
+  };
+
+  const removeUrl = (index) => {
+    setForm((prev) => ({
+      ...prev,
+      reference_urls: prev.reference_urls.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleUrlKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addUrl(urlInput);
+    }
+    // Backspace on empty input removes last tag
+    if (e.key === 'Backspace' && urlInput === '' && form.reference_urls.length > 0) {
+      removeUrl(form.reference_urls.length - 1);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (form.reference_urls.length === 0) {
+      toast.error('Add at least one reference URL');
+      return;
+    }
     if (form.platforms.length === 0) {
       toast.error('Select at least one platform');
       return;
@@ -64,7 +102,7 @@ export default function Dashboard() {
     try {
       const res = await generateAds(form);
       setResult(res.data);
-      toast.success(`Generated! ${res.data.tokens_used} tokens used.`);
+      toast.success(`Generated! ${res.data.tokens_used} tokens used in ${res.data.time_seconds?.toFixed(1)}s`);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Generation failed');
     } finally {
@@ -118,34 +156,41 @@ export default function Dashboard() {
                 <input name="inclusions" value={form.inclusions} onChange={handleChange} required placeholder="e.g., 20% off + breakfast + spa access" />
               </div>
               <div className="form-group">
-                <label>Reference URL *</label>
-                <input name="reference_url" type="url" value={form.reference_url} onChange={handleChange} required placeholder="https://hotel-website.com" />
+                <label>Reference URLs * <span style={{ fontSize: '0.7rem', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(type URL &amp; press Enter)</span></label>
+                <div className="url-tags-container" onClick={() => document.getElementById('url-input').focus()}>
+                  {form.reference_urls.map((url, i) => (
+                    <div key={i} className="url-tag">
+                      <span>{url.replace(/^https?:\/\//, '').slice(0, 40)}</span>
+                      <button type="button" onClick={() => removeUrl(i)}><X size={12} /></button>
+                    </div>
+                  ))}
+                  <input
+                    id="url-input"
+                    className="url-tags-input"
+                    type="url"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={handleUrlKeyDown}
+                    onBlur={() => { if (urlInput.trim()) addUrl(urlInput); }}
+                    placeholder={form.reference_urls.length === 0 ? 'https://hotel-website.com' : 'Add another URL...'}
+                  />
+                </div>
               </div>
               <div className="form-group">
-                <label>Google Listing URL *</label>
-                <input name="google_listing_url" value={form.google_listing_url} onChange={handleChange} required placeholder="https://maps.google.com/..." />
+                <label>Google Listing URL <span style={{ fontSize: '0.7rem', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
+                <input name="google_listing_url" value={form.google_listing_url} onChange={handleChange} placeholder="https://maps.google.com/..." />
               </div>
               <div className="form-group">
                 <label>Other Information</label>
                 <textarea name="other_info" value={form.other_info} onChange={handleChange} rows={2} placeholder="Any additional context..." />
               </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Campaign Objective</label>
-                  <select name="campaign_objective" value={form.campaign_objective} onChange={handleChange}>
-                    {OBJECTIVES.map((o) => (
-                      <option key={o} value={o}>{o || 'Auto-detect'}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>LLM Model</label>
-                  <select name="model_name" value={form.model_name} onChange={handleChange}>
-                    {MODELS.map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
-                  </select>
-                </div>
+              <div className="form-group">
+                <label>Campaign Objective</label>
+                <select name="campaign_objective" value={form.campaign_objective} onChange={handleChange}>
+                  {OBJECTIVES.map((o) => (
+                    <option key={o} value={o}>{o || 'Auto-detect'}</option>
+                  ))}
+                </select>
               </div>
               <div className="form-group">
                 <label>Platforms</label>
@@ -169,7 +214,9 @@ export default function Dashboard() {
           </section>
 
           <section className="results-panel">
-            {result ? (
+            {loading ? (
+              <GenerationProgress />
+            ) : result ? (
               <AdResults data={result} />
             ) : (
               <div className="empty-state">

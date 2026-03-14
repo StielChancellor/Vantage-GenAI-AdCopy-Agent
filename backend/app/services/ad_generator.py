@@ -1,10 +1,12 @@
 """Ad copy generation using Gemini with RAG context, brand guardrails, and platform optimization."""
 import json
+import time
 from datetime import datetime, timezone
 
 import google.generativeai as genai
 
 from backend.app.core.config import get_settings
+from backend.app.core.database import get_firestore
 from backend.app.services.rag_engine import retrieve_top_ads, get_brand_usps
 from backend.app.services.scraper import scrape_hotel_page
 from backend.app.services.reviews import fetch_google_reviews
@@ -39,32 +41,65 @@ PLATFORM_SPECS = {
 }
 
 
+def _get_admin_model() -> str:
+    """Get the admin-configured default model from Firestore."""
+    try:
+        db = get_firestore()
+        doc = db.collection("admin_settings").document("config").get()
+        if doc.exists:
+            return doc.to_dict().get("default_model", "gemini-2.5-flash")
+    except Exception:
+        pass
+    return "gemini-2.5-flash"
+
+
 async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse:
     """Full ad copy generation pipeline."""
+    start_time = time.time()
     genai.configure(api_key=settings.GEMINI_API_KEY)
 
-    # 1. Gather context in parallel-ish fashion
+    # Get admin-configured model
+    model_name = _get_admin_model()
+
+    # 1. Gather context
     # RAG: retrieve historical top performers
     top_ads = retrieve_top_ads(request.hotel_name)
 
     # Brand USPs & guardrails
     brand_data = get_brand_usps(request.hotel_name)
 
-    # Scrape reference URL
-    scraped = {}
-    try:
-        scraped = await scrape_hotel_page(request.reference_url)
-    except Exception:
-        scraped = {"content": "Could not scrape reference URL.", "title": ""}
+    # Scrape ALL reference URLs and merge content
+    scraped_contents = []
+    for url in request.reference_urls:
+        url = url.strip()
+        if not url:
+            continue
+        try:
+            result = await scrape_hotel_page(url)
+            scraped_contents.append(result)
+        except Exception:
+            scraped_contents.append({"content": f"Could not scrape {url}.", "title": ""})
 
-    # Google Reviews insights
+    # Merge all scraped content
+    scraped = {
+        "content": "\n\n---\n\n".join(
+            [s.get("content", "") for s in scraped_contents if s.get("content")]
+        ),
+        "title": " | ".join(
+            [s.get("title", "") for s in scraped_contents if s.get("title")]
+        ),
+        "urls_scraped": len(scraped_contents),
+    }
+
+    # Google Reviews insights (only if URL provided)
     review_data = {}
-    try:
-        review_data = await fetch_google_reviews(
-            request.google_listing_url, request.hotel_name
-        )
-    except Exception:
-        review_data = {"insights": "No review data available.", "review_count": 0}
+    if request.google_listing_url and request.google_listing_url.strip():
+        try:
+            review_data = await fetch_google_reviews(
+                request.google_listing_url, request.hotel_name
+            )
+        except Exception:
+            review_data = {"insights": "No review data available.", "review_count": 0}
 
     # 2. Build the system prompt with guardrails
     system_prompt = _build_system_prompt(brand_data)
@@ -80,7 +115,7 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
 
     # 4. Call Gemini
     model = genai.GenerativeModel(
-        request.model_name,
+        model_name,
         system_instruction=system_prompt,
     )
 
@@ -96,11 +131,14 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
 
     variants = _parse_response(response.text, request.platforms)
 
+    elapsed = round(time.time() - start_time, 2)
+
     return AdGenerationResponse(
         hotel_name=request.hotel_name,
         variants=variants,
         tokens_used=tokens_used,
-        model_used=request.model_name,
+        model_used=model_name,
+        time_seconds=elapsed,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -185,7 +223,7 @@ def _build_user_prompt(
     # Scraped website content
     website_context = ""
     if scraped.get("content"):
-        website_context = f"\n\n## HOTEL WEBSITE CONTENT:\n{scraped['content'][:3000]}"
+        website_context = f"\n\n## HOTEL WEBSITE CONTENT ({scraped.get('urls_scraped', 1)} pages analyzed):\n{scraped['content'][:5000]}"
 
     # Objective weighting
     weighting = ""

@@ -15,7 +15,7 @@ steps:
       - 'deploy'
       - 'vantage-adcopy-agent'
       - '--image=gcr.io/$PROJECT_ID/vantage-adcopy-agent'
-      - '--region=us-central1'
+      - '--region=asia-south1'
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--memory=1Gi'

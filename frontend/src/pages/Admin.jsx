@@ -5,10 +5,11 @@ import {
   createUser, listUsers, deleteUser,
   uploadHistoricalAds, uploadBrandUSP,
   getAuditLogs, getUsageStats,
+  getAdminSettings, updateAdminSettings,
   logout as apiLogout,
 } from '../services/api';
 import toast from 'react-hot-toast';
-import { LogOut, Users, Upload, Activity, ArrowLeft, Trash2 } from 'lucide-react';
+import { LogOut, Users, Upload, Activity, ArrowLeft, Trash2, Settings } from 'lucide-react';
 
 export default function Admin() {
   const { user, logoutUser } = useAuth();
@@ -18,6 +19,11 @@ export default function Admin() {
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState({});
   const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '', role: 'user' });
+
+  // Settings state
+  const [settings, setSettings] = useState({ default_model: 'gemini-2.5-flash' });
+  const [availableModels, setAvailableModels] = useState([]);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
     if (user?.role !== 'admin') {
@@ -46,6 +52,28 @@ export default function Admin() {
       const res = await getUsageStats();
       setStats(res.data);
     } catch {}
+  };
+
+  const loadSettings = async () => {
+    try {
+      const res = await getAdminSettings();
+      setSettings(res.data.settings || { default_model: 'gemini-2.5-flash' });
+      setAvailableModels(res.data.available_models || []);
+    } catch (err) {
+      toast.error('Failed to load settings');
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await updateAdminSettings(settings);
+      toast.success('Settings saved successfully');
+    } catch (err) {
+      toast.error('Failed to save settings');
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
   const handleCreateUser = async (e) => {
@@ -107,13 +135,16 @@ export default function Admin() {
       <main className="main-content">
         <div className="admin-tabs">
           <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => { setTab('users'); loadUsers(); }}>
-            <Users size={16} /> Users
+            <Users size={16} /> <span className="tab-label">Users</span>
           </button>
           <button className={`tab ${tab === 'upload' ? 'active' : ''}`} onClick={() => setTab('upload')}>
-            <Upload size={16} /> Data Upload
+            <Upload size={16} /> <span className="tab-label">Data Upload</span>
           </button>
           <button className={`tab ${tab === 'logs' ? 'active' : ''}`} onClick={() => { setTab('logs'); loadLogs(); loadStats(); }}>
-            <Activity size={16} /> Audit & Usage
+            <Activity size={16} /> <span className="tab-label">Audit & Usage</span>
+          </button>
+          <button className={`tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => { setTab('settings'); loadSettings(); }}>
+            <Settings size={16} /> <span className="tab-label">Settings</span>
           </button>
         </div>
 
@@ -205,6 +236,36 @@ export default function Admin() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {tab === 'settings' && (
+          <div className="admin-panel">
+            <h3>LLM Model Configuration</h3>
+            <p style={{ marginBottom: '1.25rem', fontSize: '0.85rem' }}>
+              Select the default AI model used for all ad copy generation. This setting applies globally to all users.
+            </p>
+            <div className="settings-group">
+              <div className="settings-row">
+                <label>Default LLM Model</label>
+                <select
+                  value={settings.default_model}
+                  onChange={(e) => setSettings({ ...settings, default_model: e.target.value })}
+                >
+                  {availableModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveSettings}
+                disabled={savingSettings}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                {savingSettings ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
           </div>
         )}
       </main>

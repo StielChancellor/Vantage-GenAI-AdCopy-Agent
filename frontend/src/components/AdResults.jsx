@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, Download, CheckCircle } from 'lucide-react';
+import { Copy, Download, CheckCircle, Clock, Coins, Cpu } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function AdResults({ data }) {
@@ -38,10 +38,19 @@ export default function AdResults({ data }) {
       <div className="results-header">
         <h2>Generated Ad Copy</h2>
         <div className="results-meta">
-          <span className="token-badge">Tokens: {data.tokens_used}</span>
-          <span className="model-badge">Model: {data.model_used}</span>
-          <button className="btn btn-sm" onClick={downloadCSV}>
-            <Download size={14} /> Download CSV
+          <span className="stat-badge tokens">
+            <Coins size={13} /> {data.tokens_used?.toLocaleString()} tokens
+          </span>
+          {data.time_seconds != null && (
+            <span className="stat-badge time">
+              <Clock size={13} /> {data.time_seconds.toFixed(1)}s
+            </span>
+          )}
+          <span className="stat-badge model">
+            <Cpu size={13} /> {data.model_used}
+          </span>
+          <button className="btn btn-sm btn-outline" onClick={downloadCSV}>
+            <Download size={14} /> CSV
           </button>
         </div>
       </div>

@@ -7,8 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from backend.app.core.auth import require_admin
 from backend.app.core.database import get_firestore, get_chroma
 from backend.app.core.auth import hash_password
-from backend.app.models.schemas import UserCreate, UserOut, CSVUploadResponse, BrandUSP
+from backend.app.models.schemas import UserCreate, UserOut, CSVUploadResponse, BrandUSP, AdminSettings
 from backend.app.services.csv_ingestion import ingest_historical_csv, ingest_brand_usp_csv
+
+AVAILABLE_MODELS = [
+    {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+    {"id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite"},
+    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+    {"id": "gemini-2.0-flash-lite", "label": "Gemini 2.0 Flash Lite"},
+]
 
 router = APIRouter()
 
@@ -158,3 +165,21 @@ async def get_usage_stats(admin: dict = Depends(require_admin)):
             stats[email]["total_tokens"] += data.get("tokens_consumed", 0)
 
     return stats
+
+
+# ── Settings ────────────────────────────────────────
+@router.get("/admin/settings")
+async def get_admin_settings(admin: dict = Depends(require_admin)):
+    db = get_firestore()
+    doc = db.collection("admin_settings").document("config").get()
+    current = doc.to_dict() if doc.exists else {"default_model": "gemini-2.5-flash"}
+    return {"settings": current, "available_models": AVAILABLE_MODELS}
+
+
+@router.put("/admin/settings")
+async def update_admin_settings(body: AdminSettings, admin: dict = Depends(require_admin)):
+    db = get_firestore()
+    db.collection("admin_settings").document("config").set(
+        {"default_model": body.default_model}, merge=True
+    )
+    return {"status": "updated", "default_model": body.default_model}

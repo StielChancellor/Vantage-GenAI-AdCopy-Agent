@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { login } from '../services/api';
 import toast from 'react-hot-toast';
+import { Zap } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -34,7 +35,9 @@ export default function Login() {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
+          <Zap size={32} style={{ color: '#c9a84c', marginBottom: '0.5rem' }} />
           <h1>Vantage AdCopy</h1>
+          <div className="login-divider" />
           <p>AI-Powered Ad Copy Generation</p>
         </div>
         <form onSubmit={handleSubmit}>
