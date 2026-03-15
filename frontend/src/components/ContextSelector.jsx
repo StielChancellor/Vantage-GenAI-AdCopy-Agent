@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 
 const CONTEXT_TYPES = [
-  { value: 'single_property', label: 'Single Property', desc: 'One hotel/property' },
-  { value: 'multi_property', label: 'Multi-Property', desc: 'Multiple properties' },
-  { value: 'destination', label: 'Destination', desc: 'Location/cluster' },
-  { value: 'brand_hq', label: 'Brand HQ', desc: 'Brand-wide campaign' },
+  { value: 'single_property', label: 'Single Property' },
+  { value: 'multi_property', label: 'Multi-Property' },
+  { value: 'destination', label: 'Destination' },
+  { value: 'brand_hq', label: 'Brand HQ' },
 ];
 
 export default function ContextSelector({ value, onChange }) {
@@ -15,7 +15,6 @@ export default function ContextSelector({ value, onChange }) {
   const propertyNames = value?.property_names || [];
   const destinationName = value?.destination_name || '';
   const generationMode = value?.generation_mode || 'unified';
-
   const brandName = value?.brand_name || '';
   const brandTagline = value?.brand_tagline || '';
 
@@ -36,7 +35,6 @@ export default function ContextSelector({ value, onChange }) {
   };
 
   const handleTypeChange = (type) => {
-    // Reset fields when type changes
     update({
       context_type: type,
       property_names: [],
@@ -48,122 +46,100 @@ export default function ContextSelector({ value, onChange }) {
     setPropertyInput('');
   };
 
-  // Derive hotel_name for backward compat
-  const getHotelName = () => {
-    if (contextType === 'single_property') return propertyNames[0] || '';
-    if (contextType === 'destination') return destinationName;
-    return propertyNames.join(', ');
-  };
-
-  const isValid = () => {
-    if (contextType === 'single_property') return propertyNames.length > 0;
-    if (contextType === 'multi_property') return propertyNames.length > 0;
-    if (contextType === 'brand_hq') return brandName.trim().length > 0;
-    if (contextType === 'destination') return destinationName.trim().length > 0;
-    return false;
-  };
-
   return (
     <div className="context-selector">
-      <label>Identity</label>
-      <div className="context-type-grid">
-        {CONTEXT_TYPES.map((ct) => (
-          <button
-            key={ct.value}
-            type="button"
-            className={`context-type-card ${contextType === ct.value ? 'active' : ''}`}
-            onClick={() => handleTypeChange(ct.value)}
-          >
-            <span className="context-type-label">{ct.label}</span>
-            <span className="context-type-desc">{ct.desc}</span>
-          </button>
-        ))}
+      <div className="form-row">
+        <div className="form-group">
+          <label>Identity Type</label>
+          <select value={contextType} onChange={(e) => handleTypeChange(e.target.value)}>
+            {CONTEXT_TYPES.map((ct) => (
+              <option key={ct.value} value={ct.value}>{ct.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          {contextType === 'single_property' && (
+            <>
+              <label>Property Name *</label>
+              <input
+                value={propertyNames[0] || ''}
+                onChange={(e) => update({ property_names: [e.target.value] })}
+                placeholder="e.g., The Grand Hyatt Mumbai"
+              />
+            </>
+          )}
+          {contextType === 'brand_hq' && (
+            <>
+              <label>Brand Name *</label>
+              <input
+                value={brandName}
+                onChange={(e) => update({ brand_name: e.target.value })}
+                placeholder="e.g., Taj Hotels, ITC Hotels"
+              />
+            </>
+          )}
+          {contextType === 'destination' && (
+            <>
+              <label>Destination *</label>
+              <input
+                value={destinationName}
+                onChange={(e) => update({ destination_name: e.target.value })}
+                placeholder="e.g., Goa, Rajasthan, Maldives"
+              />
+            </>
+          )}
+          {contextType === 'multi_property' && (
+            <>
+              <label>Properties * <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>(type & Enter)</span></label>
+              <div className="url-tags-container" onClick={() => document.getElementById('ctx-prop-input')?.focus()}>
+                {propertyNames.map((name, i) => (
+                  <div key={i} className="url-tag">
+                    <span>{name}</span>
+                    <button type="button" onClick={() => removeProperty(i)}><X size={12} /></button>
+                  </div>
+                ))}
+                <input
+                  id="ctx-prop-input"
+                  className="url-tags-input"
+                  value={propertyInput}
+                  onChange={(e) => setPropertyInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); addProperty(propertyInput); }
+                    if (e.key === 'Backspace' && propertyInput === '' && propertyNames.length > 0) removeProperty(propertyNames.length - 1);
+                  }}
+                  placeholder="Add property name..."
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Single Property */}
-      {contextType === 'single_property' && (
-        <div className="form-group" style={{ marginTop: '0.75rem' }}>
-          <label>Property Name *</label>
-          <input
-            value={propertyNames[0] || ''}
-            onChange={(e) => update({ property_names: [e.target.value] })}
-            placeholder="e.g., The Grand Hyatt Mumbai"
-          />
+      {/* Multi-property generation mode */}
+      {contextType === 'multi_property' && (
+        <div className="form-group">
+          <label>Generation Mode</label>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <label className="radio-label">
+              <input type="radio" name="gen-mode" value="unified" checked={generationMode === 'unified'} onChange={() => update({ generation_mode: 'unified' })} />
+              Unified (single brand)
+            </label>
+            <label className="radio-label">
+              <input type="radio" name="gen-mode" value="per_property" checked={generationMode === 'per_property'} onChange={() => update({ generation_mode: 'per_property' })} />
+              Per-Property (separate)
+            </label>
+          </div>
         </div>
       )}
 
-      {/* Multi-Property — tag-based property input + generation mode */}
-      {contextType === 'multi_property' && (
-        <>
-          <div className="form-group" style={{ marginTop: '0.75rem' }}>
-            <label>Properties * <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>(type name & press Enter)</span></label>
-            <div className="url-tags-container" onClick={() => document.getElementById('ctx-prop-input')?.focus()}>
-              {propertyNames.map((name, i) => (
-                <div key={i} className="url-tag">
-                  <span>{name}</span>
-                  <button type="button" onClick={() => removeProperty(i)}><X size={12} /></button>
-                </div>
-              ))}
-              <input
-                id="ctx-prop-input"
-                className="url-tags-input"
-                value={propertyInput}
-                onChange={(e) => setPropertyInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); addProperty(propertyInput); }
-                  if (e.key === 'Backspace' && propertyInput === '' && propertyNames.length > 0) removeProperty(propertyNames.length - 1);
-                }}
-                placeholder="Add property name..."
-              />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label>Generation Mode</label>
-            <div className="checkbox-grid">
-              <label className="radio-label">
-                <input type="radio" name="gen-mode" value="unified" checked={generationMode === 'unified'} onChange={() => update({ generation_mode: 'unified' })} />
-                Unified (single brand campaign)
-              </label>
-              <label className="radio-label">
-                <input type="radio" name="gen-mode" value="per_property" checked={generationMode === 'per_property'} onChange={() => update({ generation_mode: 'per_property' })} />
-                Per-Property (separate for each)
-              </label>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Brand HQ — brand name + optional tagline */}
+      {/* Brand HQ tagline */}
       {contextType === 'brand_hq' && (
-        <>
-          <div className="form-group" style={{ marginTop: '0.75rem' }}>
-            <label>Brand Name *</label>
-            <input
-              value={brandName}
-              onChange={(e) => update({ brand_name: e.target.value })}
-              placeholder="e.g., Taj Hotels, ITC Hotels, Marriott"
-            />
-          </div>
-          <div className="form-group">
-            <label>Brand Tagline <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>(optional)</span></label>
-            <input
-              value={brandTagline}
-              onChange={(e) => update({ brand_tagline: e.target.value })}
-              placeholder="e.g., Luxury Redefined"
-            />
-          </div>
-        </>
-      )}
-
-      {/* Destination */}
-      {contextType === 'destination' && (
-        <div className="form-group" style={{ marginTop: '0.75rem' }}>
-          <label>Destination Name *</label>
+        <div className="form-group">
+          <label>Brand Tagline <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>(optional)</span></label>
           <input
-            value={destinationName}
-            onChange={(e) => update({ destination_name: e.target.value })}
-            placeholder="e.g., Goa, Rajasthan, Maldives"
+            value={brandTagline}
+            onChange={(e) => update({ brand_tagline: e.target.value })}
+            placeholder="e.g., Luxury Redefined"
           />
         </div>
       )}

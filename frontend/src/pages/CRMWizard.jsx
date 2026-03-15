@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { generateCRM, refineCRM, searchEvents, exportCRMCalendar, placesAutocomplete } from '../services/api';
 import toast from 'react-hot-toast';
-import AppNavbar from '../components/AppNavbar';
 import CRMResults from '../components/CRMResults';
 import CalendarView from '../components/CalendarView';
 import GenerationProgress from '../components/GenerationProgress';
@@ -239,10 +238,9 @@ export default function CRMWizard() {
   const hotelName = getHotelNameFromContext(context);
 
   return (
-    <div className="dashboard">
-      <AppNavbar />
-
-      <main className="main-content">
+    <>
+      <div className="page-header">
+        <h1>CRM Campaign</h1>
         <div className="mode-toggle">
           <button className={`mode-toggle-pill ${viewMode === 'builder' ? 'active' : ''}`} onClick={() => setViewMode('builder')}>
             Builder
@@ -251,10 +249,11 @@ export default function CRMWizard() {
             <Sparkles size={14} /> Copilot
           </button>
         </div>
+      </div>
 
-        {viewMode === 'copilot' ? (
-          <CopilotChat mode="crm" />
-        ) : (
+      {viewMode === 'copilot' ? (
+        <CopilotChat mode="crm" />
+      ) : (
         <>
         {/* Step indicator */}
         <div className="wizard-steps">
@@ -575,8 +574,7 @@ export default function CRMWizard() {
           )}
         </div>
         </>
-        )}
-      </main>
-    </div>
+      )}
+    </>
   );
 }

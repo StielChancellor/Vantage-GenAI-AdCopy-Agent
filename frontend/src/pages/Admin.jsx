@@ -8,7 +8,6 @@ import {
   exportUsageCSV,
 } from '../services/api';
 import toast from 'react-hot-toast';
-import AppNavbar from '../components/AppNavbar';
 import TrainingWizard from '../components/TrainingWizard';
 import { Users, Activity, Trash2, Settings, Download, Brain } from 'lucide-react';
 
@@ -117,11 +116,10 @@ export default function Admin() {
   };
 
   return (
-    <div className="dashboard">
-      <AppNavbar />
-
-      <main className="main-content">
-        <h2 style={{ marginBottom: '1rem' }}>Admin Portal</h2>
+    <>
+      <div className="page-header">
+        <h1>Admin Panel</h1>
+      </div>
 
         <div className="admin-tabs">
           <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => { setTab('users'); loadUsers(); }}>
@@ -257,7 +255,6 @@ export default function Admin() {
             </div>
           </div>
         )}
-      </main>
-    </div>
+    </>
   );
 }

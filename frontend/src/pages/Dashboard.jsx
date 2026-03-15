@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../hooks/useAuth';
 import { generateAds, refineAds, getUrlSuggestions, placesAutocomplete } from '../services/api';
 import toast from 'react-hot-toast';
 import AdResults from '../components/AdResults';
 import GenerationProgress from '../components/GenerationProgress';
-import AppNavbar from '../components/AppNavbar';
 import ContextSelector, { getHotelNameFromContext, isContextValid } from '../components/ContextSelector';
 import { Zap, X, Plus, Sparkles } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import CopilotChat from '../components/CopilotChat';
 
 const PLATFORMS = [
@@ -22,8 +19,6 @@ const PLATFORMS = [
 const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
 
 export default function Dashboard() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
   const [viewMode, setViewMode] = useState('builder');
   const [context, setContext] = useState({
     context_type: 'single_property',
@@ -236,10 +231,9 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="dashboard">
-      <AppNavbar />
-
-      <main className="main-content">
+    <>
+      <div className="page-header">
+        <h1>Ad Copy</h1>
         <div className="mode-toggle">
           <button className={`mode-toggle-pill ${viewMode === 'builder' ? 'active' : ''}`} onClick={() => setViewMode('builder')}>
             Builder
@@ -248,24 +242,34 @@ export default function Dashboard() {
             <Sparkles size={14} /> Copilot
           </button>
         </div>
+      </div>
 
-        {viewMode === 'copilot' ? (
-          <CopilotChat mode="ad_copy" />
-        ) : (
-        <div className="content-grid">
-          <section className="form-panel">
-            <h2>Generate Ad Copy</h2>
-            <form onSubmit={handleSubmit}>
-              <ContextSelector value={context} onChange={setContext} />
+      {viewMode === 'copilot' ? (
+        <CopilotChat mode="ad_copy" />
+      ) : (
+        <>
+        <div className="page-centered">
+          <form className="campaign-form" onSubmit={handleSubmit}>
+            <ContextSelector value={context} onChange={setContext} />
 
+            <div className="form-row">
               <div className="form-group">
                 <label>Offer Name *</label>
                 <input name="offer_name" value={form.offer_name} onChange={handleChange} required placeholder="e.g., Summer Escape Package" />
               </div>
               <div className="form-group">
-                <label>Inclusions *</label>
-                <input name="inclusions" value={form.inclusions} onChange={handleChange} required placeholder="e.g., 20% off + breakfast + spa access" />
+                <label>Campaign Objective</label>
+                <select name="campaign_objective" value={form.campaign_objective} onChange={handleChange}>
+                  {OBJECTIVES.map((o) => (
+                    <option key={o} value={o}>{o || 'Auto-detect'}</option>
+                  ))}
+                </select>
               </div>
+            </div>
+            <div className="form-group">
+              <label>Inclusions *</label>
+              <input name="inclusions" value={form.inclusions} onChange={handleChange} required placeholder="e.g., 20% off + breakfast + spa access" />
+            </div>
 
               {/* Reference URLs with autocomplete */}
               <div className="form-group" style={{ position: 'relative' }}>
@@ -334,97 +338,86 @@ export default function Dashboard() {
                 <label>Other Information</label>
                 <textarea name="other_info" value={form.other_info} onChange={handleChange} rows={2} placeholder="Any additional context..." />
               </div>
-              <div className="form-group">
-                <label>Campaign Objective</label>
-                <select name="campaign_objective" value={form.campaign_objective} onChange={handleChange}>
-                  {OBJECTIVES.map((o) => (
-                    <option key={o} value={o}>{o || 'Auto-detect'}</option>
-                  ))}
-                </select>
+            <div className="form-group">
+              <label>Platforms</label>
+              <div className="platform-pills">
+                {PLATFORMS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`platform-pill ${form.platforms.includes(p.id) ? 'active' : ''}`}
+                    onClick={() => togglePlatform(p.id)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
               </div>
-              <div className="form-group">
-                <label>Platforms</label>
-                <div className="checkbox-grid">
-                  {PLATFORMS.map((p) => (
-                    <label key={p.id} className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={form.platforms.includes(p.id)}
-                        onChange={() => togglePlatform(p.id)}
-                      />
-                      {p.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
+            </div>
 
-              {/* Carousel card config (when fb_carousel selected) */}
-              {form.platforms.includes('fb_carousel') && (
-                <div className="form-group carousel-config" style={{ animation: 'fadeSlideUp 0.3s ease' }}>
-                  <label>Carousel Card Setup</label>
-                  <div className="radio-group">
-                    <label className="radio-label">
-                      <input type="radio" name="carouselMode" value="suggest" checked={carouselMode === 'suggest'} onChange={() => setCarouselMode('suggest')} />
-                      Suggest carousel flow (AI recommends card visuals)
-                    </label>
-                    <label className="radio-label">
-                      <input type="radio" name="carouselMode" value="manual" checked={carouselMode === 'manual'} onChange={() => setCarouselMode('manual')} />
-                      Provide details for each card
-                    </label>
+            {/* Carousel card config (when fb_carousel selected) */}
+            {form.platforms.includes('fb_carousel') && (
+              <div className="form-group carousel-config" style={{ animation: 'fadeSlideUp 0.3s ease' }}>
+                <label>Carousel Card Setup</label>
+                <div className="radio-group">
+                  <label className="radio-label">
+                    <input type="radio" name="carouselMode" value="suggest" checked={carouselMode === 'suggest'} onChange={() => setCarouselMode('suggest')} />
+                    Suggest carousel flow (AI recommends card visuals)
+                  </label>
+                  <label className="radio-label">
+                    <input type="radio" name="carouselMode" value="manual" checked={carouselMode === 'manual'} onChange={() => setCarouselMode('manual')} />
+                    Provide details for each card
+                  </label>
+                </div>
+                {carouselMode === 'manual' && (
+                  <div className="carousel-cards-input">
+                    {carouselCards.map((card, i) => (
+                      <div key={i} className="card-input-row">
+                        <span className="card-number">Card {i + 1}</span>
+                        <input
+                          value={card}
+                          onChange={(e) => {
+                            const updated = [...carouselCards];
+                            updated[i] = e.target.value;
+                            setCarouselCards(updated);
+                          }}
+                          placeholder="e.g., Hotel facade with doorman greeting guests"
+                        />
+                        {carouselCards.length > 2 && (
+                          <button type="button" className="btn-icon danger" onClick={() => setCarouselCards(carouselCards.filter((_, j) => j !== i))}>
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {carouselCards.length < 10 && (
+                      <button type="button" className="btn btn-sm btn-outline" onClick={() => setCarouselCards([...carouselCards, ''])}>
+                        <Plus size={14} /> Add Card
+                      </button>
+                    )}
                   </div>
-                  {carouselMode === 'manual' && (
-                    <div className="carousel-cards-input">
-                      {carouselCards.map((card, i) => (
-                        <div key={i} className="card-input-row">
-                          <span className="card-number">Card {i + 1}</span>
-                          <input
-                            value={card}
-                            onChange={(e) => {
-                              const updated = [...carouselCards];
-                              updated[i] = e.target.value;
-                              setCarouselCards(updated);
-                            }}
-                            placeholder="e.g., Hotel facade with doorman greeting guests"
-                          />
-                          {carouselCards.length > 2 && (
-                            <button type="button" className="btn-icon danger" onClick={() => setCarouselCards(carouselCards.filter((_, j) => j !== i))}>
-                              <X size={14} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      {carouselCards.length < 10 && (
-                        <button type="button" className="btn btn-sm btn-outline" onClick={() => setCarouselCards([...carouselCards, ''])}>
-                          <Plus size={14} /> Add Card
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
-                {loading ? 'Generating...' : 'Generate Ad Copy'}
-              </button>
-            </form>
-          </section>
-
-          <section className="results-panel">
-            {loading ? (
-              <GenerationProgress />
-            ) : result ? (
-              <AdResults data={result} form={form} onRefine={handleRefine} refining={refining} />
-            ) : (
-              <div className="empty-state">
-                <Zap size={48} />
-                <h3>Ready to Generate</h3>
-                <p>Fill in hotel details and click Generate to create optimized ad copy.</p>
+                )}
               </div>
             )}
-          </section>
+
+            <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
+              {loading ? 'Generating...' : <><Zap size={16} /> Generate Ad Copy</>}
+            </button>
+          </form>
         </div>
+
+        {loading && (
+          <div className="page-centered" style={{ marginTop: '1.5rem' }}>
+            <GenerationProgress />
+          </div>
         )}
-      </main>
-    </div>
+
+        {result && !loading && (
+          <div className="page-centered" style={{ marginTop: '1.5rem' }}>
+            <AdResults data={result} form={form} onRefine={handleRefine} refining={refining} />
+          </div>
+        )}
+        </>
+      )}
+    </>
   );
 }

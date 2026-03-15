@@ -7,12 +7,18 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import CRMWizard from './pages/CRMWizard';
 import Admin from './pages/Admin';
+import AppLayout from './components/AppLayout';
 
-function ProtectedRoute({ children, adminOnly = false }) {
+function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading">Loading...</div>;
   if (!user) return <Navigate to="/" />;
-  if (adminOnly && user.role !== 'admin') return <Navigate to="/adcopy" />;
+  return children;
+}
+
+function RequireAdmin({ children }) {
+  const { user } = useAuth();
+  if (user?.role !== 'admin') return <Navigate to="/adcopy" />;
   return children;
 }
 
@@ -24,9 +30,14 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={user ? <Navigate to="/adcopy" /> : <LandingPage />} />
       <Route path="/login" element={user ? <Navigate to="/adcopy" /> : <Login />} />
-      <Route path="/adcopy" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-      <Route path="/crm" element={<ProtectedRoute><CRMWizard /></ProtectedRoute>} />
-      <Route path="/admin" element={<ProtectedRoute adminOnly><Admin /></ProtectedRoute>} />
+
+      {/* Authenticated routes with sidebar layout */}
+      <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+        <Route path="/adcopy" element={<Dashboard />} />
+        <Route path="/crm" element={<CRMWizard />} />
+        <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
+      </Route>
+
       {/* Backward compatibility redirect */}
       <Route path="/dashboard" element={<Navigate to="/adcopy" replace />} />
       <Route path="*" element={<Navigate to="/" />} />
