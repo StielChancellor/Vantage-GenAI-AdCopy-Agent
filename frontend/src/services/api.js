@@ -94,4 +94,10 @@ export const generateCRM = (data) => api.post('/crm/generate', data);
 export const refineCRM = (data) => api.post('/crm/refine', data);
 export const exportCRMCalendar = (data) => api.post('/crm/export-calendar', data, { responseType: 'blob' });
 
+// Copilot
+export const copilotChat = (data) => api.post('/copilot/chat', data);
+export const saveBrief = (data) => api.post('/copilot/briefs/save', data);
+export const loadBriefs = (mode) => api.get(`/copilot/briefs/${mode}`);
+export const deleteBrief = (briefId) => api.delete(`/copilot/briefs/${briefId}`);
+
 export default api;

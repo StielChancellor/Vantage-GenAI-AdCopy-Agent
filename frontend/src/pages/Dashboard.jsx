@@ -6,8 +6,9 @@ import AdResults from '../components/AdResults';
 import GenerationProgress from '../components/GenerationProgress';
 import AppNavbar from '../components/AppNavbar';
 import ContextSelector, { getHotelNameFromContext, isContextValid } from '../components/ContextSelector';
-import { Zap, X, Plus } from 'lucide-react';
+import { Zap, X, Plus, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import CopilotChat from '../components/CopilotChat';
 
 const PLATFORMS = [
   { id: 'google_search', label: 'Google Search' },
@@ -23,6 +24,7 @@ const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [viewMode, setViewMode] = useState('builder');
   const [context, setContext] = useState({
     context_type: 'single_property',
     property_names: [],
@@ -238,6 +240,18 @@ export default function Dashboard() {
       <AppNavbar />
 
       <main className="main-content">
+        <div className="mode-toggle">
+          <button className={`mode-toggle-pill ${viewMode === 'builder' ? 'active' : ''}`} onClick={() => setViewMode('builder')}>
+            Builder
+          </button>
+          <button className={`mode-toggle-pill ${viewMode === 'copilot' ? 'active' : ''}`} onClick={() => setViewMode('copilot')}>
+            <Sparkles size={14} /> Copilot
+          </button>
+        </div>
+
+        {viewMode === 'copilot' ? (
+          <CopilotChat mode="ad_copy" />
+        ) : (
         <div className="content-grid">
           <section className="form-panel">
             <h2>Generate Ad Copy</h2>
@@ -409,6 +423,7 @@ export default function Dashboard() {
             )}
           </section>
         </div>
+        )}
       </main>
     </div>
   );

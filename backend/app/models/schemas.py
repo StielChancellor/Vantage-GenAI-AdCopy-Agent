@@ -219,3 +219,42 @@ class EventResult(BaseModel):
     source: str
     market: str
     relevance_score: float = 0.0
+
+
+# ── Copilot ────────────────────────────────────────
+class CopilotMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+    brief_snapshot: Optional[dict] = None
+    timestamp: Optional[str] = None
+
+
+class CopilotChatRequest(BaseModel):
+    mode: str  # "ad_copy" | "crm"
+    messages: list[CopilotMessage]
+    current_brief: Optional[dict] = None
+
+
+class BriefField(BaseModel):
+    value: Optional[str] = None
+    confidence: str = "missing"  # "confirmed" | "inferred" | "missing"
+
+
+class CopilotChatResponse(BaseModel):
+    message: str
+    brief: dict  # {field_name: {value, confidence}}
+    ready_to_generate: bool = False
+    suggestions: list[str] = []
+    tokens_used: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    model_used: str = ""
+
+
+class SavedBrief(BaseModel):
+    brief_id: Optional[str] = None
+    user_id: str = ""
+    mode: str = ""  # "ad_copy" | "crm"
+    name: str = ""
+    brief: dict = {}
+    created_at: Optional[str] = None

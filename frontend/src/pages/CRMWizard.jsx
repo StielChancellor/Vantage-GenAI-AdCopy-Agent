@@ -9,7 +9,8 @@ import GenerationProgress from '../components/GenerationProgress';
 import ContextSelector, { getHotelNameFromContext, isContextValid } from '../components/ContextSelector';
 import ChannelFrequency from '../components/ChannelFrequency';
 import EventCalendar from '../components/EventCalendar';
-import { Zap, X, Plus, Search, ChevronRight, ChevronLeft, Calendar, MessageSquare } from 'lucide-react';
+import { Zap, X, Plus, Search, ChevronRight, ChevronLeft, Calendar, MessageSquare, Sparkles } from 'lucide-react';
+import CopilotChat from '../components/CopilotChat';
 
 const CHANNELS = [
   { id: 'whatsapp', label: 'WhatsApp', color: '#25d366' },
@@ -44,6 +45,7 @@ const STEPS = [
 
 export default function CRMWizard() {
   const { user } = useAuth();
+  const [viewMode, setViewMode] = useState('builder');
   const [step, setStep] = useState(1);
 
   // Step 1: Context & Channel
@@ -241,6 +243,19 @@ export default function CRMWizard() {
       <AppNavbar />
 
       <main className="main-content">
+        <div className="mode-toggle">
+          <button className={`mode-toggle-pill ${viewMode === 'builder' ? 'active' : ''}`} onClick={() => setViewMode('builder')}>
+            Builder
+          </button>
+          <button className={`mode-toggle-pill ${viewMode === 'copilot' ? 'active' : ''}`} onClick={() => setViewMode('copilot')}>
+            <Sparkles size={14} /> Copilot
+          </button>
+        </div>
+
+        {viewMode === 'copilot' ? (
+          <CopilotChat mode="crm" />
+        ) : (
+        <>
         {/* Step indicator */}
         <div className="wizard-steps">
           {STEPS.map((s) => (
@@ -559,6 +574,8 @@ export default function CRMWizard() {
             </div>
           )}
         </div>
+        </>
+        )}
       </main>
     </div>
   );
