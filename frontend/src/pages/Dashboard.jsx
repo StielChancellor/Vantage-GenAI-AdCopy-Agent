@@ -4,8 +4,8 @@ import { generateAds, refineAds, getUrlSuggestions, placesAutocomplete } from '.
 import toast from 'react-hot-toast';
 import AdResults from '../components/AdResults';
 import GenerationProgress from '../components/GenerationProgress';
-import { LogOut, Zap, X, Plus } from 'lucide-react';
-import { logout as apiLogout } from '../services/api';
+import AppNavbar from '../components/AppNavbar';
+import { Zap, X, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const PLATFORMS = [
@@ -20,7 +20,7 @@ const PLATFORMS = [
 const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
 
 export default function Dashboard() {
-  const { user, logoutUser } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({
     hotel_name: '',
@@ -220,33 +220,9 @@ export default function Dashboard() {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await apiLogout();
-    } catch {}
-    logoutUser();
-    navigate('/login');
-  };
-
   return (
     <div className="dashboard">
-      <nav className="topbar">
-        <div className="topbar-brand">
-          <Zap size={20} />
-          <span>Vantage GenAI</span>
-        </div>
-        <div className="topbar-user">
-          <span>{user?.full_name}</span>
-          {user?.role === 'admin' && (
-            <button className="btn btn-sm" onClick={() => navigate('/admin')}>
-              Admin
-            </button>
-          )}
-          <button className="btn btn-sm btn-outline" onClick={handleLogout}>
-            <LogOut size={16} /> Logout
-          </button>
-        </div>
-      </nav>
+      <AppNavbar />
 
       <main className="main-content">
         <div className="content-grid">

@@ -7,13 +7,14 @@ import {
   getAuditLogs, getUsageStats,
   getAdminSettings, updateAdminSettings,
   exportUsageCSV,
-  logout as apiLogout,
 } from '../services/api';
 import toast from 'react-hot-toast';
-import { LogOut, Users, Upload, Activity, ArrowLeft, Trash2, Settings, Download } from 'lucide-react';
+import AppNavbar from '../components/AppNavbar';
+import TrainingWizard from '../components/TrainingWizard';
+import { Users, Upload, Activity, Trash2, Settings, Download, Brain } from 'lucide-react';
 
 export default function Admin() {
-  const { user, logoutUser } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] = useState('users');
   const [users, setUsers] = useState([]);
@@ -28,7 +29,7 @@ export default function Admin() {
 
   useEffect(() => {
     if (user?.role !== 'admin') {
-      navigate('/dashboard');
+      navigate('/adcopy');
       return;
     }
     loadUsers();
@@ -126,36 +127,22 @@ export default function Admin() {
     }
   };
 
-  const handleLogout = async () => {
-    try { await apiLogout(); } catch {}
-    logoutUser();
-    navigate('/login');
-  };
-
   return (
     <div className="dashboard">
-      <nav className="topbar">
-        <div className="topbar-brand">
-          <button className="btn btn-sm btn-outline" onClick={() => navigate('/dashboard')}>
-            <ArrowLeft size={16} /> Back
-          </button>
-          <span>Admin Portal</span>
-        </div>
-        <div className="topbar-user">
-          <span>{user?.full_name}</span>
-          <button className="btn btn-sm btn-outline" onClick={handleLogout}>
-            <LogOut size={16} /> Logout
-          </button>
-        </div>
-      </nav>
+      <AppNavbar />
 
       <main className="main-content">
+        <h2 style={{ marginBottom: '1rem' }}>Admin Portal</h2>
+
         <div className="admin-tabs">
           <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => { setTab('users'); loadUsers(); }}>
             <Users size={16} /> <span className="tab-label">Users</span>
           </button>
           <button className={`tab ${tab === 'upload' ? 'active' : ''}`} onClick={() => setTab('upload')}>
             <Upload size={16} /> <span className="tab-label">Data Upload</span>
+          </button>
+          <button className={`tab ${tab === 'training' ? 'active' : ''}`} onClick={() => setTab('training')}>
+            <Brain size={16} /> <span className="tab-label">Training</span>
           </button>
           <button className={`tab ${tab === 'logs' ? 'active' : ''}`} onClick={() => { setTab('logs'); loadLogs(); loadStats(); }}>
             <Activity size={16} /> <span className="tab-label">Audit & Usage</span>
@@ -216,6 +203,10 @@ export default function Admin() {
               <input type="file" accept=".csv" onChange={(e) => e.target.files[0] && handleUpload('brand', e.target.files[0])} />
             </div>
           </div>
+        )}
+
+        {tab === 'training' && (
+          <TrainingWizard />
         )}
 
         {tab === 'logs' && (

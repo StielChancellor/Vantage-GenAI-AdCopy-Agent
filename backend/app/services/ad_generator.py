@@ -8,6 +8,7 @@ import google.generativeai as genai
 from backend.app.core.config import get_settings
 from backend.app.core.database import get_firestore
 from backend.app.services.rag_engine import retrieve_ad_insights, get_brand_usps
+from backend.app.services.training_engine import get_training_directives
 from backend.app.services.scraper import scrape_hotel_page
 from backend.app.services.reviews import fetch_google_reviews
 from backend.app.models.schemas import (
@@ -81,6 +82,9 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     # Brand USPs & guardrails
     brand_data = get_brand_usps(request.hotel_name)
 
+    # Training directives (approved AI-generated insights from admin)
+    training_directives = get_training_directives(request.hotel_name)
+
     # Scrape ALL reference URLs and merge content
     scraped_contents = []
     for url in request.reference_urls:
@@ -131,6 +135,7 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         scraped=scraped,
         review_data=review_data,
         brand_data=brand_data,
+        training_directives=training_directives,
     )
 
     # 4. Call Gemini
@@ -301,6 +306,7 @@ def _build_user_prompt(
     scraped: dict,
     review_data: dict,
     brand_data: dict | None,
+    training_directives: list[dict] | None = None,
 ) -> str:
     """Build the user prompt with all gathered context."""
 
@@ -382,6 +388,20 @@ Generate exactly 5 card suggestions, 5 matching headlines, and 5 matching descri
             for p in ad_insights["patterns"][:5]:
                 historical_context += f"- {p}\n"
 
+    # Training directive context (admin-approved AI insights)
+    training_context = ""
+    if training_directives:
+        for td in training_directives:
+            content = td.get("content", {})
+            if content.get("insight_text"):
+                training_context += f"\n\n## TRAINING DIRECTIVES (admin-approved):\n{content['insight_text']}"
+            if content.get("recommended_tone"):
+                training_context += f"\nRecommended Tone: {content['recommended_tone']}"
+            if content.get("power_words"):
+                training_context += "\nPower Words: " + ", ".join(content["power_words"][:10])
+            if content.get("avoid_words"):
+                training_context += "\nWords to Avoid: " + ", ".join(content["avoid_words"][:10])
+
     # Brand USP context
     usp_context = ""
     if brand_data:
@@ -419,6 +439,7 @@ Generate exactly 5 card suggestions, 5 matching headlines, and 5 matching descri
 {"".join(platform_instructions)}
 {carousel_context}
 {historical_context}
+{training_context}
 {usp_context}
 {review_context}
 {website_context}

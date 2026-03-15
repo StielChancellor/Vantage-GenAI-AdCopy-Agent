@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.app.core.config import get_settings
-from backend.app.routers import auth, admin, generate, health, places
+from backend.app.routers import auth, admin, generate, health, places, training, events, crm
 
 settings = get_settings()
 
@@ -31,6 +31,9 @@ app.include_router(auth.router, prefix=settings.API_V1_PREFIX, tags=["Auth"])
 app.include_router(admin.router, prefix=settings.API_V1_PREFIX, tags=["Admin"])
 app.include_router(generate.router, prefix=settings.API_V1_PREFIX, tags=["Generate"])
 app.include_router(places.router, prefix=settings.API_V1_PREFIX, tags=["Places"])
+app.include_router(training.router, prefix=settings.API_V1_PREFIX, tags=["Training"])
+app.include_router(events.router, prefix=settings.API_V1_PREFIX, tags=["Events"])
+app.include_router(crm.router, prefix=settings.API_V1_PREFIX, tags=["CRM"])
 
 # Serve React frontend static files in production
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"

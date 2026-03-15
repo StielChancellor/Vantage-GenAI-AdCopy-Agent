@@ -72,4 +72,25 @@ export const getUrlSuggestions = (query) => api.get(`/generate/url-suggestions?q
 // Places
 export const placesAutocomplete = (query) => api.get(`/places/autocomplete?query=${encodeURIComponent(query)}`);
 
+// Training (Admin)
+export const startTraining = (file, csvType, hotelName = '') => {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('csv_type', csvType);
+  if (hotelName) form.append('hotel_name', hotelName);
+  return api.post('/training/upload', form);
+};
+export const answerTraining = (data) => api.post('/training/answer', data);
+export const getTrainingSessions = () => api.get('/training/sessions');
+export const getTrainingDirectives = (hotelName) => api.get(`/training/directives/${encodeURIComponent(hotelName)}`);
+export const deleteTrainingDirective = (hotelName, type) => api.delete(`/training/directives/${encodeURIComponent(hotelName)}/${type}`);
+
+// Events
+export const searchEvents = (data) => api.post('/events/search', data);
+
+// CRM
+export const generateCRM = (data) => api.post('/crm/generate', data);
+export const refineCRM = (data) => api.post('/crm/refine', data);
+export const exportCRMCalendar = (data) => api.post('/crm/export-calendar', data, { responseType: 'blob' });
+
 export default api;

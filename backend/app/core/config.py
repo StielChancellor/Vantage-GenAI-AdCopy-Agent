@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Google Places API
     GOOGLE_PLACES_API_KEY: str = ""
 
+    # Google Custom Search (Event Grounding)
+    GOOGLE_CUSTOM_SEARCH_API_KEY: str = ""
+    GOOGLE_CUSTOM_SEARCH_CX: str = ""
+
     # GCP
     GCP_PROJECT_ID: str = "vantage-genai-adcopy-agent"
     GCP_PROJECT_NUMBER: str = "566761437172"

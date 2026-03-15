@@ -22,7 +22,7 @@ export default function Login() {
       if (res.data.user.role === 'admin') {
         navigate('/admin');
       } else {
-        navigate('/dashboard');
+        navigate('/adcopy');
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Login failed');
