@@ -40,9 +40,6 @@ class Settings(BaseSettings):
     GCP_PROJECT_ID: str = "vantage-genai-adcopy-agent"
     GCP_PROJECT_NUMBER: str = "566761437172"
 
-    # ChromaDB
-    CHROMA_PERSIST_DIR: str = "./chroma_data"
-
     # Cache
     REVIEW_CACHE_DAYS: int = 30
 

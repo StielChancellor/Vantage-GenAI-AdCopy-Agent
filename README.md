@@ -1,6 +1,6 @@
 # Vantage GenAI Ad Copy Agent
 
-An enterprise-grade, AI-powered ad copy generation platform built for the hospitality industry. Leverages Google Gemini AI with RAG (Retrieval-Augmented Generation) to produce platform-optimized advertising copy for hotels, resorts, and hospitality brands.
+An enterprise-grade, AI-powered ad copy generation platform built for the hospitality industry. Leverages Google Gemini AI with pre-processed performance insights to produce platform-optimized advertising copy for hotels, resorts, and hospitality brands.
 
 **Live Demo:** [vantage-adcopy-agent](https://vantage-adcopy-agent-566761437172.asia-south1.run.app)
 
@@ -37,7 +37,7 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
 ## Features
 
 - **AI-Powered Ad Copy** - Generates optimized ad copy using Google Gemini with context-aware prompts
-- **RAG Pipeline** - Retrieves top-performing historical ads via ChromaDB vector search to inform new generations
+- **AI-Powered Insights** - Analyzes historical ad performance on CSV upload via Gemini, stores persistent insights in Firestore for every generation
 - **Multi-Platform Output** - Produces copy for Google Search, FB Single Image, FB Carousel, FB Video, Performance Max, and YouTube simultaneously
 - **URL Autocomplete** - Bare domain entry (auto-prepends `https://`), tag-based multi-URL input with history suggestions from previous generations
 - **Google Places Autocomplete** - Search hotels by name, view ratings and review counts, add multiple Google listings with tag-based selection
@@ -72,10 +72,10 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
                              |
           +------------------+------------------+
           |                  |                  |
-+---------v------+  +--------v-------+  +------v--------+
-|  Google Gemini |  |   Firestore    |  |   ChromaDB    |
-|  (AI Model)    |  |   (NoSQL DB)   |  |  (Vector DB)  |
-+----------------+  +----------------+  +---------------+
++---------v------+  +--------v-------+
+|  Google Gemini |  |   Firestore    |
+|  (AI Model)    |  |   (NoSQL DB)   |
++----------------+  +----------------+
           |
 +---------v-----------+
 |  Google Places API  |
@@ -86,7 +86,7 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
 **Data Flow:**
 1. User submits hotel details, reference URLs (with autocomplete), Google listings (via Places search), and target platforms
 2. Backend scrapes reference URLs and fetches Google Reviews from selected listings
-3. RAG engine retrieves top-performing historical ads from ChromaDB
+3. Pre-processed ad performance insights are fetched from Firestore (generated on CSV upload)
 4. Brand USPs and guardrails are loaded from Firestore
 5. All context is assembled into a structured prompt for Gemini AI (with carousel alignment rules if applicable)
 6. Generated ad copy is parsed, logged with cost metrics, and returned to the frontend
@@ -101,8 +101,7 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
 | **Frontend** | React 19, Vite 8, React Router 7, Axios, Lucide   |
 | **Backend**  | Python 3.12, FastAPI, Uvicorn, Pydantic            |
 | **AI**       | Google Gemini (google-generativeai SDK)             |
-| **Database** | Google Cloud Firestore (structured data + auth)     |
-| **Vector DB**| ChromaDB (embedded, for RAG similarity search)      |
+| **Database** | Google Cloud Firestore (structured data, insights, auth) |
 | **Auth**     | Custom JWT (PyJWT + bcrypt)                         |
 | **Scraping** | httpx, BeautifulSoup4, lxml                        |
 | **Hosting**  | Google Cloud Run (serverless, asia-south1)           |
@@ -121,7 +120,7 @@ Vantage-GenAI-AdCopy-Agent/
 │   │   ├── core/
 │   │   │   ├── config.py           # Pydantic settings (env vars)
 │   │   │   ├── auth.py             # JWT tokens, bcrypt passwords, auth deps
-│   │   │   └── database.py         # Firestore & ChromaDB client singletons
+│   │   │   └── database.py         # Firestore client singleton
 │   │   ├── models/
 │   │   │   └── schemas.py          # Pydantic request/response models
 │   │   ├── routers/
@@ -131,9 +130,9 @@ Vantage-GenAI-AdCopy-Agent/
 │   │   │   ├── generate.py         # Ad generation, refinement + cost logging
 │   │   │   └── places.py           # Google Places autocomplete proxy
 │   │   └── services/
-│   │       ├── ad_generator.py     # Main generation pipeline (RAG + AI)
-│   │       ├── rag_engine.py       # ChromaDB retrieval & brand USP lookup
-│   │       ├── csv_ingestion.py    # CSV parsing & ingestion
+│   │       ├── ad_generator.py     # Main generation pipeline (insights + AI)
+│   │       ├── rag_engine.py       # Firestore insight retrieval & brand USP lookup
+│   │       ├── csv_ingestion.py    # CSV parsing, ingestion & AI insight generation
 │   │       ├── scraper.py          # Web scraping (1-level deep crawl)
 │   │       └── reviews.py          # Google Reviews API integration
 │   ├── scripts/
@@ -213,9 +212,6 @@ Vantage-GenAI-AdCopy-Agent/
    # Google Places API (for reviews)
    GOOGLE_PLACES_API_KEY=your-places-api-key
 
-   # ChromaDB
-   CHROMA_PERSIST_DIR=./chroma_data
-
    # Cache
    REVIEW_CACHE_DAYS=30
    ```
@@ -282,7 +278,6 @@ docker run -p 8080:8080 \
   -e JWT_SECRET_KEY=your-secret \
   -e FIREBASE_PROJECT_ID=your-project \
   -e GCP_PROJECT_ID=your-project \
-  -e CHROMA_PERSIST_DIR=./chroma_data \
   -e REVIEW_CACHE_DAYS=30 \
   vantage-adcopy-agent
 ```
@@ -319,7 +314,7 @@ gcloud run deploy vantage-adcopy-agent \
 ```bash
 gcloud run services update vantage-adcopy-agent \
   --region=asia-south1 \
-  --set-env-vars="GEMINI_API_KEY=...,GOOGLE_PLACES_API_KEY=...,JWT_SECRET_KEY=...,FIREBASE_PROJECT_ID=...,GCP_PROJECT_ID=...,CHROMA_PERSIST_DIR=./chroma_data,REVIEW_CACHE_DAYS=30"
+  --set-env-vars="GEMINI_API_KEY=...,GOOGLE_PLACES_API_KEY=...,JWT_SECRET_KEY=...,FIREBASE_PROJECT_ID=...,GCP_PROJECT_ID=...,REVIEW_CACHE_DAYS=30"
 ```
 
 ---
@@ -363,9 +358,11 @@ Interactive API documentation is available at:
 The generation process follows a multi-stage pipeline:
 
 ```
-1. HISTORICAL AD RETRIEVAL (RAG)
-   Query ChromaDB for the top 5 similar historical ads by hotel name.
-   Falls back to global top performers (by CTR + CVR) for cold-start scenarios.
+1. HISTORICAL AD INSIGHTS
+   Fetch pre-processed performance insights from Firestore (generated by
+   Gemini on CSV upload). Includes top-performing headlines, descriptions,
+   patterns, and actionable findings. Falls back to global insights if
+   no hotel-specific data exists.
 
 2. BRAND USP LOOKUP
    Fetch brand-specific USPs, positive keywords, negative keywords, and
@@ -383,7 +380,7 @@ The generation process follows a multi-stage pipeline:
 
 5. PROMPT ASSEMBLY
    Build a structured system prompt with brand restrictions and a user prompt
-   with all gathered context (scraped content, reviews, historical ads, USPs).
+   with all gathered context (scraped content, reviews, ad insights, USPs).
    For FB Carousel: include carousel card context (AI-suggest or manual mode)
    with strict index alignment between visuals, headlines, and descriptions.
 
@@ -426,7 +423,7 @@ The generation process follows a multi-stage pipeline:
 The admin panel (`/admin`) provides five tabs:
 
 1. **Users** - Create, view, edit, and delete users. Assign admin or user roles.
-2. **CSV Upload** - Upload historical ad performance data and brand USP sheets for RAG ingestion.
+2. **CSV Upload** - Upload historical ad performance data (auto-generates AI insights) and brand USP sheets.
 3. **Audit & Usage** - View detailed generation logs with hotel name, tokens used, cost in INR, and generation time. Export all usage data as CSV.
 4. **Usage Stats** - Per-user aggregate statistics: login count, total generations, total tokens, and total cost.
 5. **Settings** - Select the default Gemini AI model for all generations.
@@ -452,7 +449,7 @@ Costs are converted to INR (at 85.0 USD/INR rate) and stored in each audit log e
 
 ### Historical Ads CSV
 
-Upload past ad performance data for the RAG engine. The system dynamically maps columns:
+Upload past ad performance data. The system dynamically maps columns, stores raw ads in Firestore, and generates AI-powered insights per hotel via Gemini:
 
 | Column (flexible naming)   | Description                                 |
 |----------------------------|---------------------------------------------|
@@ -488,7 +485,6 @@ Upload brand-specific guardrails and keywords:
 | `GCP_PROJECT_ID`               | Yes      | Google Cloud project ID                      |
 | `GOOGLE_PLACES_API_KEY`        | No       | Google Places API key (for reviews feature)  |
 | `FIREBASE_SERVICE_ACCOUNT_PATH`| No       | Path to service account JSON (local dev)     |
-| `CHROMA_PERSIST_DIR`           | No       | ChromaDB storage path (default: `./chroma_data`) |
 | `REVIEW_CACHE_DAYS`            | No       | Review cache TTL in days (default: `30`)     |
 
 ### Available AI Models
@@ -519,7 +515,6 @@ Tests cover:
 
 ## Known Limitations
 
-- **ChromaDB Persistence on Cloud Run** - ChromaDB data is stored in the container's ephemeral filesystem. Data persists only during instance lifetime and is lost on cold starts. For production, consider mounting a persistent volume or using an external vector database.
 - **Gemini API Quotas** - Free tier has limited requests per minute/day. Enable billing on your GCP project for production workloads to avoid 429 rate-limit errors.
 - **CORS** - Currently configured to allow all origins. Restrict to your domain in production.
 

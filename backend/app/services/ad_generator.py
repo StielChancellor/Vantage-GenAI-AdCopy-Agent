@@ -1,4 +1,4 @@
-"""Ad copy generation using Gemini with RAG context, brand guardrails, and platform optimization."""
+"""Ad copy generation using Gemini with pre-processed insights, brand guardrails, and platform optimization."""
 import json
 import time
 from datetime import datetime, timezone
@@ -7,7 +7,7 @@ import google.generativeai as genai
 
 from backend.app.core.config import get_settings
 from backend.app.core.database import get_firestore
-from backend.app.services.rag_engine import retrieve_top_ads, get_brand_usps
+from backend.app.services.rag_engine import retrieve_ad_insights, get_brand_usps
 from backend.app.services.scraper import scrape_hotel_page
 from backend.app.services.reviews import fetch_google_reviews
 from backend.app.models.schemas import (
@@ -75,8 +75,8 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     model_name = _get_admin_model()
 
     # 1. Gather context
-    # RAG: retrieve historical top performers
-    top_ads = retrieve_top_ads(request.hotel_name)
+    # Pre-processed ad performance insights from Firestore
+    ad_insights = retrieve_ad_insights(request.hotel_name)
 
     # Brand USPs & guardrails
     brand_data = get_brand_usps(request.hotel_name)
@@ -127,7 +127,7 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     # 3. Build the user prompt with all context
     user_prompt = _build_user_prompt(
         request=request,
-        top_ads=top_ads,
+        ad_insights=ad_insights,
         scraped=scraped,
         review_data=review_data,
         brand_data=brand_data,
@@ -297,7 +297,7 @@ If any of these words appear in your output, the generation will be rejected."""
 
 def _build_user_prompt(
     request: AdGenerationRequest,
-    top_ads: list[dict],
+    ad_insights: dict,
     scraped: dict,
     review_data: dict,
     brand_data: dict | None,
@@ -361,14 +361,26 @@ should be about arrival/welcome, NOT about spa or dining.
 
 Generate exactly 5 card suggestions, 5 matching headlines, and 5 matching descriptions — all aligned by index."""
 
-    # Historical ad context
+    # Historical ad performance insights
     historical_context = ""
-    if top_ads:
-        historical_context = "\n\n## TOP PERFORMING HISTORICAL ADS (use as style reference):\n"
-        for i, ad in enumerate(top_ads[:3]):
-            historical_context += f"\nAd {i+1} (CTR: {ad.get('ctr', 0)}%, CVR: {ad.get('cvr', 0)}%):\n"
-            historical_context += f"  Headlines: {ad.get('headlines', '')}\n"
-            historical_context += f"  Descriptions: {ad.get('descriptions', '')}\n"
+    if ad_insights and ad_insights.get("insight_text"):
+        historical_context = f"\n\n## HISTORICAL AD PERFORMANCE INSIGHTS ({ad_insights.get('total_ads_analyzed', 0)} ads analyzed):\n"
+        historical_context += ad_insights["insight_text"]
+
+        if ad_insights.get("top_headlines"):
+            historical_context += "\n\n### Top-Performing Headlines (use as style reference):\n"
+            for h in ad_insights["top_headlines"][:5]:
+                historical_context += f"- {h}\n"
+
+        if ad_insights.get("top_descriptions"):
+            historical_context += "\n### Top-Performing Descriptions:\n"
+            for d in ad_insights["top_descriptions"][:5]:
+                historical_context += f"- {d}\n"
+
+        if ad_insights.get("patterns"):
+            historical_context += "\n### Key Patterns:\n"
+            for p in ad_insights["patterns"][:5]:
+                historical_context += f"- {p}\n"
 
     # Brand USP context
     usp_context = ""

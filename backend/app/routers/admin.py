@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
 from backend.app.core.auth import require_admin
-from backend.app.core.database import get_firestore, get_chroma
+from backend.app.core.database import get_firestore
 from backend.app.core.auth import hash_password
 from backend.app.models.schemas import UserCreate, UserOut, CSVUploadResponse, BrandUSP, AdminSettings
 from backend.app.services.csv_ingestion import ingest_historical_csv, ingest_brand_usp_csv

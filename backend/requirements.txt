@@ -10,9 +10,6 @@ firebase-admin==6.6.0
 # Google AI
 google-generativeai==0.8.4
 
-# Vector DB
-chromadb==0.6.3
-
 # Web Scraping
 httpx==0.28.1
 beautifulsoup4==4.12.3
