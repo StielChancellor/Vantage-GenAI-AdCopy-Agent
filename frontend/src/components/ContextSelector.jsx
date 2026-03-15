@@ -16,6 +16,9 @@ export default function ContextSelector({ value, onChange }) {
   const destinationName = value?.destination_name || '';
   const generationMode = value?.generation_mode || 'unified';
 
+  const brandName = value?.brand_name || '';
+  const brandTagline = value?.brand_tagline || '';
+
   const update = (fields) => {
     onChange({ ...value, ...fields });
   };
@@ -38,6 +41,8 @@ export default function ContextSelector({ value, onChange }) {
       context_type: type,
       property_names: [],
       destination_name: '',
+      brand_name: '',
+      brand_tagline: '',
       generation_mode: 'unified',
     });
     setPropertyInput('');
@@ -52,7 +57,8 @@ export default function ContextSelector({ value, onChange }) {
 
   const isValid = () => {
     if (contextType === 'single_property') return propertyNames.length > 0;
-    if (contextType === 'multi_property' || contextType === 'brand_hq') return propertyNames.length > 0;
+    if (contextType === 'multi_property') return propertyNames.length > 0;
+    if (contextType === 'brand_hq') return brandName.trim().length > 0;
     if (contextType === 'destination') return destinationName.trim().length > 0;
     return false;
   };
@@ -86,8 +92,8 @@ export default function ContextSelector({ value, onChange }) {
         </div>
       )}
 
-      {/* Multi-Property / Brand HQ — tag-based input */}
-      {(contextType === 'multi_property' || contextType === 'brand_hq') && (
+      {/* Multi-Property — tag-based property input + generation mode */}
+      {contextType === 'multi_property' && (
         <>
           <div className="form-group" style={{ marginTop: '0.75rem' }}>
             <label>Properties * <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>(type name & press Enter)</span></label>
@@ -128,6 +134,28 @@ export default function ContextSelector({ value, onChange }) {
         </>
       )}
 
+      {/* Brand HQ — brand name + optional tagline */}
+      {contextType === 'brand_hq' && (
+        <>
+          <div className="form-group" style={{ marginTop: '0.75rem' }}>
+            <label>Brand Name *</label>
+            <input
+              value={brandName}
+              onChange={(e) => update({ brand_name: e.target.value })}
+              placeholder="e.g., Taj Hotels, ITC Hotels, Marriott"
+            />
+          </div>
+          <div className="form-group">
+            <label>Brand Tagline <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>(optional)</span></label>
+            <input
+              value={brandTagline}
+              onChange={(e) => update({ brand_tagline: e.target.value })}
+              placeholder="e.g., Luxury Redefined"
+            />
+          </div>
+        </>
+      )}
+
       {/* Destination */}
       {contextType === 'destination' && (
         <div className="form-group" style={{ marginTop: '0.75rem' }}>
@@ -146,18 +174,21 @@ export default function ContextSelector({ value, onChange }) {
 // Helper to extract hotel_name from context for backward compat
 export function getHotelNameFromContext(context) {
   if (!context) return '';
-  const { context_type, property_names = [], destination_name = '' } = context;
+  const { context_type, property_names = [], destination_name = '', brand_name = '' } = context;
   if (context_type === 'single_property') return property_names[0] || '';
+  if (context_type === 'multi_property') return property_names.join(', ');
   if (context_type === 'destination') return destination_name;
-  return property_names.join(', ');
+  if (context_type === 'brand_hq') return brand_name;
+  return '';
 }
 
 // Helper to check if context is valid
 export function isContextValid(context) {
   if (!context) return false;
-  const { context_type, property_names = [], destination_name = '' } = context;
+  const { context_type, property_names = [], destination_name = '', brand_name = '' } = context;
   if (context_type === 'single_property') return property_names.length > 0 && property_names[0]?.trim();
-  if (context_type === 'multi_property' || context_type === 'brand_hq') return property_names.length > 0;
+  if (context_type === 'multi_property') return property_names.length > 0;
+  if (context_type === 'brand_hq') return brand_name.trim().length > 0;
   if (context_type === 'destination') return destination_name.trim().length > 0;
   return false;
 }
