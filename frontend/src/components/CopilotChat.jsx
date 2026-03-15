@@ -106,7 +106,16 @@ export default function CopilotChat({ mode }) {
   const handleSend = async (e) => {
     e?.preventDefault();
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || refining) return;
+
+    // If results already exist, treat input as refinement feedback
+    if (generationResult) {
+      const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
+      setMessages((prev) => [...prev, userMsg]);
+      setInput('');
+      await handleRefine(text);
+      return;
+    }
 
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     const updatedMessages = [...messages, userMsg];
@@ -207,9 +216,21 @@ export default function CopilotChat({ mode }) {
         result = res.data;
       }
       setGenerationResult(result);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: 'Results refined! The updated output is shown above.',
+          timestamp: new Date().toISOString(),
+        },
+      ]);
       toast.success('Refined successfully!');
     } catch (err) {
       toast.error('Refinement failed.');
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'Refinement failed. Please try again.', timestamp: new Date().toISOString() },
+      ]);
     } finally {
       setRefining(false);
     }
@@ -421,8 +442,6 @@ export default function CopilotChat({ mode }) {
               <AdResults
                 data={generationResult}
                 form={{ platforms: (brief.platforms?.value || 'google_search').split(',').map((s) => s.trim()) }}
-                onRefine={handleRefine}
-                refining={refining}
               />
             </div>
           )}
@@ -432,8 +451,6 @@ export default function CopilotChat({ mode }) {
             <div className="copilot-inline-results">
               <CRMResults
                 content={generationResult.content}
-                onRefine={handleRefine}
-                refining={refining}
               />
               {generationResult.calendar?.length > 0 && (
                 <CalendarView

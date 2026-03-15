@@ -292,20 +292,39 @@ def save_brief(user_id: str, mode: str, name: str, brief: dict) -> str:
 def load_briefs(user_id: str, mode: str) -> list[dict]:
     """Load all saved briefs for a user and mode."""
     db = get_firestore()
-    docs = (
-        db.collection("copilot_briefs")
-        .where("user_id", "==", user_id)
-        .where("mode", "==", mode)
-        .order_by("created_at", direction="DESCENDING")
-        .limit(20)
-        .stream()
-    )
-    results = []
-    for doc in docs:
-        data = doc.to_dict()
-        data["brief_id"] = doc.id
-        results.append(data)
-    return results
+    try:
+        # Try with ordering (requires composite index)
+        docs = (
+            db.collection("copilot_briefs")
+            .where("user_id", "==", user_id)
+            .where("mode", "==", mode)
+            .order_by("created_at", direction="DESCENDING")
+            .limit(20)
+            .stream()
+        )
+        results = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["brief_id"] = doc.id
+            results.append(data)
+        return results
+    except Exception:
+        # Fallback: query without ordering if composite index missing
+        docs = (
+            db.collection("copilot_briefs")
+            .where("user_id", "==", user_id)
+            .where("mode", "==", mode)
+            .limit(20)
+            .stream()
+        )
+        results = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["brief_id"] = doc.id
+            results.append(data)
+        # Sort client-side
+        results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return results
 
 
 def delete_brief(brief_id: str, user_id: str) -> bool:
