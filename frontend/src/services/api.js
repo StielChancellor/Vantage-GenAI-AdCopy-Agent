@@ -41,18 +41,6 @@ export const listUsers = () => api.get('/admin/users');
 export const deleteUser = (id) => api.delete(`/admin/users/${id}`);
 export const updateUser = (id, data) => api.put(`/admin/users/${id}`, data);
 
-// Admin - CSV Upload
-export const uploadHistoricalAds = (file) => {
-  const form = new FormData();
-  form.append('file', file);
-  return api.post('/admin/upload/historical-ads', form);
-};
-export const uploadBrandUSP = (file) => {
-  const form = new FormData();
-  form.append('file', file);
-  return api.post('/admin/upload/brand-usp', form);
-};
-
 // Admin - Audit
 export const getAuditLogs = (limit = 100) => api.get(`/admin/audit-logs?limit=${limit}`);
 export const getUsageStats = () => api.get('/admin/usage-stats');
@@ -72,18 +60,31 @@ export const getUrlSuggestions = (query) => api.get(`/generate/url-suggestions?q
 // Places
 export const placesAutocomplete = (query) => api.get(`/places/autocomplete?query=${encodeURIComponent(query)}`);
 
-// Training (Admin)
-export const startTraining = (file, csvType, hotelName = '') => {
+// Training (Admin) — Phase 2.1 revised
+export const startTraining = (file, sectionType, trainingMode, textInput = '', kpiColumns = [], heroColumns = []) => {
   const form = new FormData();
-  form.append('file', file);
-  form.append('csv_type', csvType);
-  if (hotelName) form.append('hotel_name', hotelName);
+  if (file) form.append('file', file);
+  form.append('section_type', sectionType);
+  form.append('training_mode', trainingMode);
+  form.append('text_input', textInput);
+  form.append('kpi_columns', JSON.stringify(kpiColumns));
+  form.append('hero_columns', JSON.stringify(heroColumns));
   return api.post('/training/upload', form);
 };
 export const answerTraining = (data) => api.post('/training/answer', data);
 export const getTrainingSessions = () => api.get('/training/sessions');
-export const getTrainingDirectives = (hotelName) => api.get(`/training/directives/${encodeURIComponent(hotelName)}`);
-export const deleteTrainingDirective = (hotelName, type) => api.delete(`/training/directives/${encodeURIComponent(hotelName)}/${type}`);
+export const getTrainingDirectives = (sectionType = '') => {
+  if (sectionType) return api.get(`/training/directives/${encodeURIComponent(sectionType)}`);
+  return api.get('/training/directives');
+};
+export const deleteTrainingDirective = (directiveId) => api.delete(`/training/directives/${encodeURIComponent(directiveId)}`);
+export const exportTrainingSessions = () => api.get('/training/sessions/export', { responseType: 'blob' });
+export const searchKnowledgeBase = (query = '', sectionType = '') => {
+  const params = new URLSearchParams();
+  if (query) params.append('q', query);
+  if (sectionType) params.append('section_type', sectionType);
+  return api.get(`/training/knowledge-base?${params.toString()}`);
+};
 
 // Events
 export const searchEvents = (data) => api.post('/events/search', data);

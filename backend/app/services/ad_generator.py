@@ -82,8 +82,8 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     # Brand USPs & guardrails
     brand_data = get_brand_usps(request.hotel_name)
 
-    # Training directives (approved AI-generated insights from admin)
-    training_directives = get_training_directives(request.hotel_name)
+    # Training directives (approved AI-generated insights from admin — global)
+    training_directives = get_training_directives()
 
     # Scrape ALL reference URLs and merge content
     scraped_contents = []

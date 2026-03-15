@@ -6,6 +6,9 @@ import AppNavbar from '../components/AppNavbar';
 import CRMResults from '../components/CRMResults';
 import CalendarView from '../components/CalendarView';
 import GenerationProgress from '../components/GenerationProgress';
+import ContextSelector, { getHotelNameFromContext, isContextValid } from '../components/ContextSelector';
+import ChannelFrequency from '../components/ChannelFrequency';
+import EventCalendar from '../components/EventCalendar';
 import { Zap, X, Plus, Search, ChevronRight, ChevronLeft, Calendar, MessageSquare } from 'lucide-react';
 
 const CHANNELS = [
@@ -30,10 +33,9 @@ const TONES = [
 ];
 
 const EVENT_CATEGORIES = ['festivals', 'holidays', 'sports', 'conferences'];
-const FREQUENCIES = ['daily', 'weekly', 'biweekly', 'monthly'];
 
 const STEPS = [
-  { num: 1, label: 'Hotel & Channels' },
+  { num: 1, label: 'Identity & Channels' },
   { num: 2, label: 'Campaign Details' },
   { num: 3, label: 'Events' },
   { num: 4, label: 'Schedule' },
@@ -44,8 +46,13 @@ export default function CRMWizard() {
   const { user } = useAuth();
   const [step, setStep] = useState(1);
 
-  // Step 1: Hotel & Channel
-  const [hotelName, setHotelName] = useState('');
+  // Step 1: Context & Channel
+  const [context, setContext] = useState({
+    context_type: 'single_property',
+    property_names: [],
+    destination_name: '',
+    generation_mode: 'unified',
+  });
   const [channels, setChannels] = useState([]);
   const [campaignType, setCampaignType] = useState('promotional');
   const [referenceUrls, setReferenceUrls] = useState([]);
@@ -71,16 +78,17 @@ export default function CRMWizard() {
   const [selectedEvents, setSelectedEvents] = useState([]);
   const [searchingEvents, setSearchingEvents] = useState(false);
 
-  // Step 4: Schedule
+  // Step 4: Schedule & Frequency
   const [scheduleStart, setScheduleStart] = useState('');
   const [scheduleEnd, setScheduleEnd] = useState('');
-  const [frequency, setFrequency] = useState('weekly');
+  const [channelFrequencies, setChannelFrequencies] = useState({});
+  const [frequency, setFrequency] = useState('weekly'); // Fallback
 
   // Step 5: Results
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [refining, setRefining] = useState(false);
-  const [resultTab, setResultTab] = useState('messages'); // 'messages' | 'calendar'
+  const [resultTab, setResultTab] = useState('messages');
 
   // Places autocomplete
   useEffect(() => {
@@ -151,8 +159,10 @@ export default function CRMWizard() {
     setResult(null);
     setStep(5);
     try {
+      const hotelName = getHotelNameFromContext(context);
       const payload = {
         hotel_name: hotelName,
+        context,
         channels,
         campaign_type: campaignType,
         target_audience: targetAudience,
@@ -162,6 +172,7 @@ export default function CRMWizard() {
         schedule_start: scheduleStart,
         schedule_end: scheduleEnd,
         frequency,
+        channel_frequencies: channelFrequencies,
         inclusions,
         other_info: otherInfo,
         reference_urls: referenceUrls,
@@ -182,7 +193,7 @@ export default function CRMWizard() {
     setRefining(true);
     try {
       const res = await refineCRM({
-        hotel_name: hotelName,
+        hotel_name: getHotelNameFromContext(context),
         channels,
         previous_content: result.content,
         previous_calendar: result.calendar,
@@ -215,13 +226,15 @@ export default function CRMWizard() {
 
   const canProceed = () => {
     switch (step) {
-      case 1: return hotelName.trim() && channels.length > 0;
+      case 1: return isContextValid(context) && channels.length > 0;
       case 2: return targetAudience.trim() && offerDetails.trim();
       case 3: return true; // Events are optional
       case 4: return scheduleStart && scheduleEnd;
       default: return true;
     }
   };
+
+  const hotelName = getHotelNameFromContext(context);
 
   return (
     <div className="dashboard">
@@ -239,17 +252,14 @@ export default function CRMWizard() {
         </div>
 
         <div className="wizard-content">
-          {/* STEP 1: Hotel & Channels */}
+          {/* STEP 1: Identity & Channels */}
           {step === 1 && (
             <section className="wizard-panel">
-              <h2>Hotel & Channel Selection</h2>
+              <h2>Identity & Channel Selection</h2>
 
-              <div className="form-group">
-                <label>Hotel Name *</label>
-                <input value={hotelName} onChange={(e) => setHotelName(e.target.value)} placeholder="e.g., The Grand Hyatt" required />
-              </div>
+              <ContextSelector value={context} onChange={setContext} />
 
-              <div className="form-group">
+              <div className="form-group" style={{ marginTop: '1rem' }}>
                 <label>Channels *</label>
                 <div className="checkbox-grid">
                   {CHANNELS.map((ch) => (
@@ -421,28 +431,16 @@ export default function CRMWizard() {
                 <Search size={16} /> {searchingEvents ? 'Searching...' : 'Search Events'}
               </button>
 
-              {/* Event results */}
+              {/* Event results — Calendar/Timeline toggle */}
               {eventResults.length > 0 && (
-                <div className="event-results">
-                  <h4>Found {eventResults.length} Events</h4>
-                  {eventResults.map((event, i) => {
-                    const isSelected = selectedEvents.find((e) => e.title === event.title && e.date === event.date);
-                    return (
-                      <div key={i} className={`event-card ${isSelected ? 'selected' : ''}`} onClick={() => toggleEvent(event)}>
-                        <div className="event-card-header">
-                          <input type="checkbox" checked={!!isSelected} readOnly />
-                          <strong>{event.title}</strong>
-                          <span className="event-date">{event.date}</span>
-                        </div>
-                        <p className="event-desc">{event.description}</p>
-                        <div className="event-meta">
-                          <span className="event-market">{event.market}</span>
-                          <span className="event-source">{event.source}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <>
+                  <h4 style={{ marginTop: '1rem' }}>Found {eventResults.length} Events</h4>
+                  <EventCalendar
+                    events={eventResults}
+                    selectedEvents={selectedEvents}
+                    onToggleEvent={toggleEvent}
+                  />
+                </>
               )}
 
               {selectedEvents.length > 0 && (
@@ -453,7 +451,7 @@ export default function CRMWizard() {
             </section>
           )}
 
-          {/* STEP 4: Schedule */}
+          {/* STEP 4: Schedule & Frequency */}
           {step === 4 && (
             <section className="wizard-panel">
               <h2>Campaign Schedule</h2>
@@ -469,20 +467,21 @@ export default function CRMWizard() {
                 </div>
               </div>
 
+              {/* Per-Channel Frequency */}
               <div className="form-group">
-                <label>Frequency</label>
-                <select value={frequency} onChange={(e) => setFrequency(e.target.value)}>
-                  {FREQUENCIES.map((f) => (
-                    <option key={f} value={f}>{f.charAt(0).toUpperCase() + f.slice(1)}</option>
-                  ))}
-                </select>
+                <label>Per-Channel Frequency</label>
+                <ChannelFrequency
+                  channels={channels}
+                  value={channelFrequencies}
+                  onChange={setChannelFrequencies}
+                />
               </div>
 
               {/* Summary */}
               <div className="wizard-summary">
                 <h4>Campaign Summary</h4>
                 <div className="summary-grid">
-                  <div><strong>Hotel:</strong> {hotelName}</div>
+                  <div><strong>Identity:</strong> {hotelName || '-'}</div>
                   <div><strong>Channels:</strong> {channels.map((c) => CHANNELS.find((ch) => ch.id === c)?.label).join(', ')}</div>
                   <div><strong>Type:</strong> {CAMPAIGN_TYPES.find((ct) => ct.id === campaignType)?.label}</div>
                   <div><strong>Tone:</strong> {TONES.find((t) => t.id === tone)?.label}</div>

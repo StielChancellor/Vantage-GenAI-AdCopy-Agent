@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import {
   createUser, listUsers, deleteUser,
-  uploadHistoricalAds, uploadBrandUSP,
   getAuditLogs, getUsageStats,
   getAdminSettings, updateAdminSettings,
   exportUsageCSV,
@@ -11,7 +10,7 @@ import {
 import toast from 'react-hot-toast';
 import AppNavbar from '../components/AppNavbar';
 import TrainingWizard from '../components/TrainingWizard';
-import { Users, Upload, Activity, Trash2, Settings, Download, Brain } from 'lucide-react';
+import { Users, Activity, Trash2, Settings, Download, Brain } from 'lucide-react';
 
 export default function Admin() {
   const { user } = useAuth();
@@ -101,16 +100,6 @@ export default function Admin() {
     }
   };
 
-  const handleUpload = async (type, file) => {
-    try {
-      const fn = type === 'historical' ? uploadHistoricalAds : uploadBrandUSP;
-      const res = await fn(file);
-      toast.success(`${res.data.rows_processed} rows processed. Hotels: ${res.data.hotels_found.join(', ')}`);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Upload failed');
-    }
-  };
-
   const handleExport = async () => {
     try {
       const res = await exportUsageCSV();
@@ -137,9 +126,6 @@ export default function Admin() {
         <div className="admin-tabs">
           <button className={`tab ${tab === 'users' ? 'active' : ''}`} onClick={() => { setTab('users'); loadUsers(); }}>
             <Users size={16} /> <span className="tab-label">Users</span>
-          </button>
-          <button className={`tab ${tab === 'upload' ? 'active' : ''}`} onClick={() => setTab('upload')}>
-            <Upload size={16} /> <span className="tab-label">Data Upload</span>
           </button>
           <button className={`tab ${tab === 'training' ? 'active' : ''}`} onClick={() => setTab('training')}>
             <Brain size={16} /> <span className="tab-label">Training</span>
@@ -187,21 +173,6 @@ export default function Admin() {
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
-
-        {tab === 'upload' && (
-          <div className="admin-panel">
-            <div className="upload-section">
-              <h3>Historical Ad Data CSV</h3>
-              <p>Upload ad platform export CSVs with headlines, descriptions, CTR, and CVR columns.</p>
-              <input type="file" accept=".csv" onChange={(e) => e.target.files[0] && handleUpload('historical', e.target.files[0])} />
-            </div>
-            <div className="upload-section">
-              <h3>Brand & USP CSV</h3>
-              <p>Upload CSV with Hotel Name, USPs, Positive Keywords, Negative Keywords, Restricted Keywords.</p>
-              <input type="file" accept=".csv" onChange={(e) => e.target.files[0] && handleUpload('brand', e.target.files[0])} />
-            </div>
           </div>
         )}
 

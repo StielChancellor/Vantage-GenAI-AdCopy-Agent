@@ -83,8 +83,8 @@ async def generate_crm_content(request: CRMGenerateRequest) -> CRMGenerateRespon
         request.google_listing_urls,
     )
 
-    # Training directives
-    directives = get_training_directives(request.hotel_name)
+    # Training directives (global — no hotel_name filter)
+    directives = get_training_directives()
 
     # Brand USPs
     brand_data = get_brand_usps(request.hotel_name)
@@ -112,6 +112,7 @@ async def generate_crm_content(request: CRMGenerateRequest) -> CRMGenerateRespon
         request.schedule_start,
         request.schedule_end,
         request.frequency,
+        channel_frequencies=getattr(request, 'channel_frequencies', {}),
     )
 
     elapsed = round(time.time() - start_time, 2)
@@ -222,18 +223,13 @@ Apply the feedback. Return the FULL updated JSON array (all channels, all messag
 
 
 def export_calendar_csv(calendar: list[dict]) -> str:
-    """Export calendar data as CSV string."""
+    """Export calendar data as CSV string with full message fields."""
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=["day", "date", "time_range", "channel", "message_preview"])
+    fieldnames = ["day", "date", "time_range", "channel", "headline", "body", "subject", "cta", "message_preview"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     for entry in calendar:
-        writer.writerow({
-            "day": entry.get("day", ""),
-            "date": entry.get("date", ""),
-            "time_range": entry.get("time_range", ""),
-            "channel": entry.get("channel", ""),
-            "message_preview": entry.get("message_preview", ""),
-        })
+        writer.writerow({f: entry.get(f, "") for f in fieldnames})
     return output.getvalue()
 
 
@@ -325,9 +321,9 @@ def _build_crm_user_prompt(
     for ch in request.channels:
         spec = CRM_CHANNEL_SPECS.get(ch, {})
         if spec:
-            msg_format = '{"body": "message text", "cta": "call to action"}'
+            msg_format = '{"headline": "short attention-grabbing headline", "body": "message text", "cta": "call to action"}'
             if spec.get("supports_subject"):
-                msg_format = '{"subject": "subject/title", "body": "message body", "cta": "call to action"}'
+                msg_format = '{"headline": "short attention-grabbing headline", "subject": "subject/title", "body": "message body", "cta": "call to action"}'
             output_format.append(f'  {{"channel": "{ch}", "messages": [{msg_format}, ...]}}')
 
     prompt = f"""Generate CRM campaign messages with the following details:
@@ -429,10 +425,14 @@ def _generate_calendar(
     schedule_start: str,
     schedule_end: str,
     frequency: str,
+    channel_frequencies: dict | None = None,
 ) -> list[dict]:
     """Generate a campaign calendar distributing messages across the schedule.
 
-    Returns list of {day, date, time_range, channel, message_preview}.
+    Supports per-channel frequency via channel_frequencies dict.
+    Falls back to uniform frequency when channel_frequencies is empty.
+
+    Returns list of {day, date, time_range, channel, headline, body, subject, cta, message_preview}.
     """
     if not schedule_start or not schedule_end:
         return []
@@ -443,15 +443,6 @@ def _generate_calendar(
     except (ValueError, TypeError):
         return []
 
-    # Determine interval based on frequency
-    intervals = {
-        "daily": timedelta(days=1),
-        "weekly": timedelta(weeks=1),
-        "biweekly": timedelta(weeks=2),
-        "monthly": timedelta(days=30),
-    }
-    interval = intervals.get(frequency, timedelta(weeks=1))
-
     # Optimal time ranges per channel
     time_ranges = {
         "whatsapp": "10:00 AM - 12:00 PM",
@@ -459,36 +450,129 @@ def _generate_calendar(
         "app_push": "6:00 PM - 8:00 PM",
     }
 
-    calendar = []
-    current = start
-    msg_indices = {ch: 0 for ch in [c.channel for c in content]}
+    # Day abbreviation to weekday index mapping
+    day_to_idx = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4, "Sat": 5, "Sun": 6}
 
-    while current <= end:
+    calendar = []
+
+    # Build a lookup: channel -> messages
+    channel_messages = {}
+    for cc in content:
+        channel_messages[cc.channel] = cc.messages or []
+
+    if channel_frequencies:
+        # Per-channel independent scheduling
         for channel_content in content:
             ch = channel_content.channel
             messages = channel_content.messages
             if not messages:
                 continue
 
-            # Cycle through messages
-            idx = msg_indices.get(ch, 0)
-            msg = messages[idx % len(messages)]
+            freq_config = channel_frequencies.get(ch, {})
+            send_days = freq_config.get("days", ["Mon"])
+            every_n_weeks = freq_config.get("every_n_weeks", 1)
+            duration_weeks = freq_config.get("duration_weeks", None)
 
-            # Build preview
-            preview = msg.get("body", "")[:50]
-            if msg.get("subject"):
-                preview = f"[{msg['subject']}] {preview}"
+            # Convert day names to weekday indices
+            send_day_indices = set()
+            for d in send_days:
+                if d in day_to_idx:
+                    send_day_indices.add(day_to_idx[d])
 
-            calendar.append({
-                "day": DAY_NAMES[current.weekday()],
-                "date": current.strftime("%Y-%m-%d"),
-                "time_range": time_ranges.get(ch, "10:00 AM - 12:00 PM"),
-                "channel": ch,
-                "message_preview": preview + ("..." if len(msg.get("body", "")) > 50 else ""),
-            })
+            if not send_day_indices:
+                send_day_indices = {0}  # Default Monday
 
-            msg_indices[ch] = idx + 1
+            # Calculate effective end date
+            ch_end = end
+            if duration_weeks:
+                ch_end = min(end, start + timedelta(weeks=duration_weeks))
 
-        current += interval
+            msg_idx = 0
+            current = start
+            week_count = 0
+            last_week_num = None
 
+            while current <= ch_end:
+                current_week = current.isocalendar()[1]
+
+                # Track week transitions for every_n_weeks logic
+                if last_week_num is not None and current_week != last_week_num:
+                    week_count += 1
+                last_week_num = current_week
+
+                # Only send on designated weeks (every N weeks)
+                if week_count % every_n_weeks == 0 and current.weekday() in send_day_indices:
+                    msg = messages[msg_idx % len(messages)]
+                    headline = msg.get("headline", "")
+                    body = msg.get("body", "")
+                    subject = msg.get("subject", "")
+                    cta = msg.get("cta", "")
+
+                    preview = body[:50]
+                    if subject:
+                        preview = f"[{subject}] {preview}"
+
+                    calendar.append({
+                        "day": DAY_NAMES[current.weekday()],
+                        "date": current.strftime("%Y-%m-%d"),
+                        "time_range": time_ranges.get(ch, "10:00 AM - 12:00 PM"),
+                        "channel": ch,
+                        "headline": headline,
+                        "body": body,
+                        "subject": subject,
+                        "cta": cta,
+                        "message_preview": preview + ("..." if len(body) > 50 else ""),
+                    })
+                    msg_idx += 1
+
+                current += timedelta(days=1)
+    else:
+        # Uniform frequency fallback
+        intervals = {
+            "daily": timedelta(days=1),
+            "weekly": timedelta(weeks=1),
+            "biweekly": timedelta(weeks=2),
+            "monthly": timedelta(days=30),
+        }
+        interval = intervals.get(frequency, timedelta(weeks=1))
+        msg_indices = {ch: 0 for ch in [c.channel for c in content]}
+        current = start
+
+        while current <= end:
+            for channel_content in content:
+                ch = channel_content.channel
+                messages = channel_content.messages
+                if not messages:
+                    continue
+
+                idx = msg_indices.get(ch, 0)
+                msg = messages[idx % len(messages)]
+
+                headline = msg.get("headline", "")
+                body = msg.get("body", "")
+                subject = msg.get("subject", "")
+                cta = msg.get("cta", "")
+
+                preview = body[:50]
+                if subject:
+                    preview = f"[{subject}] {preview}"
+
+                calendar.append({
+                    "day": DAY_NAMES[current.weekday()],
+                    "date": current.strftime("%Y-%m-%d"),
+                    "time_range": time_ranges.get(ch, "10:00 AM - 12:00 PM"),
+                    "channel": ch,
+                    "headline": headline,
+                    "body": body,
+                    "subject": subject,
+                    "cta": cta,
+                    "message_preview": preview + ("..." if len(body) > 50 else ""),
+                })
+
+                msg_indices[ch] = idx + 1
+
+            current += interval
+
+    # Sort by date
+    calendar.sort(key=lambda x: x["date"])
     return calendar

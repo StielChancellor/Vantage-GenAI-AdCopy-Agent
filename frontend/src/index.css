@@ -4,7 +4,8 @@
 /* ── Reset & Base ────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
+:root,
+[data-theme="dark"] {
   --bg: #0a0b10;
   --bg-card: #12141d;
   --bg-input: #1a1d2a;
@@ -35,6 +36,43 @@
 
   --font-display: 'Playfair Display', Georgia, serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --btn-primary-text: #0a0b10;
+}
+
+[data-theme="light"] {
+  --bg: #f5f5f7;
+  --bg-card: #ffffff;
+  --bg-input: #f0f0f5;
+  --bg-hover: #e8e8ee;
+  --border: #d4d4dc;
+  --border-light: #c0c0cc;
+  --text: #1a1a2e;
+  --text-dim: #5a5a72;
+  --text-muted: #8a8aa0;
+
+  --gold: #b8942e;
+  --gold-light: #c9a84c;
+  --gold-dark: #8a6e1a;
+  --gold-glow: rgba(184, 148, 46, 0.1);
+  --gold-glow-strong: rgba(184, 148, 46, 0.2);
+
+  --primary: #b8942e;
+  --primary-hover: #c9a84c;
+  --danger: #dc3545;
+  --success: #28a745;
+  --warning: #e6a817;
+  --info: #4a7fd9;
+
+  --radius: 10px;
+  --radius-lg: 16px;
+  --shadow-card: 0 2px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-gold: 0 2px 12px rgba(184, 148, 46, 0.1);
+
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --btn-primary-text: #ffffff;
 }
 
 body {
@@ -144,7 +182,7 @@ label {
 .btn-primary {
   background: linear-gradient(135deg, var(--gold-dark), var(--gold), var(--gold-light));
   background-size: 200% 200%;
-  color: #0a0b10;
+  color: var(--btn-primary-text);
   box-shadow: var(--shadow-gold);
 }
 .btn-primary:hover {
@@ -706,7 +744,7 @@ label {
 }
 .tab.active {
   background: linear-gradient(135deg, var(--gold-dark), var(--gold));
-  color: #0a0b10;
+  color: var(--btn-primary-text);
   border-color: var(--gold);
   font-weight: 600;
   box-shadow: var(--shadow-gold);
@@ -1512,3 +1550,749 @@ label {
 .training-error { color: var(--danger); }
 .training-history { margin-top: 1.5rem; }
 .training-history h3 { margin-bottom: 0.75rem; }
+
+/* ═══════════════════════════════════════════════════
+   PHASE 2.1: Theme Toggle, Context Selector, Channel Frequency,
+   Calendar Grid, Table View, Event Calendar, Knowledge Base
+   ═══════════════════════════════════════════════════ */
+
+/* ── Theme Toggle ──────────────────────────────── */
+.theme-toggle {
+  color: var(--gold);
+  padding: 0.4rem;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+.theme-toggle:hover { background: var(--gold-glow); }
+
+/* ── Context Selector ──────────────────────────── */
+.context-selector { margin-bottom: 1rem; }
+.context-type-grid { grid-template-columns: 1fr 1fr; }
+.context-type-grid .radio-label.active {
+  border-color: var(--gold);
+  background: var(--gold-glow);
+  color: var(--gold);
+}
+
+/* ── Channel Frequency ─────────────────────────── */
+.channel-frequency { display: flex; flex-direction: column; gap: 1rem; }
+.channel-freq-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.channel-freq-card h4 {
+  font-family: var(--font-display);
+  color: var(--gold);
+  margin-bottom: 0.75rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.9rem;
+}
+.freq-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.freq-row label {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.85rem;
+  margin-bottom: 0;
+  color: var(--text-dim);
+}
+.freq-row select { width: auto; min-width: 100px; }
+.day-picker { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.day-btn {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--text-dim);
+  font-family: var(--font-body);
+}
+.day-btn:hover { border-color: var(--gold); color: var(--gold); }
+.day-btn.active {
+  background: var(--gold);
+  color: var(--btn-primary-text);
+  border-color: var(--gold);
+}
+
+/* ── Campaign Calendar Grid ────────────────────── */
+.campaign-calendar-grid { margin-bottom: 1rem; }
+.cal-grid-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.cal-grid-header h4 {
+  font-family: var(--font-display);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 1rem;
+  margin-bottom: 0;
+}
+.cal-grid-header button {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+}
+.cal-grid-header button:hover { border-color: var(--gold); color: var(--gold); }
+.cal-grid-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.cal-grid-body { }
+.cal-grid-week { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-grid-cell {
+  min-height: 85px;
+  border: 1px solid var(--border);
+  padding: 0.35rem;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.cal-grid-cell.empty { background: var(--bg); opacity: 0.4; }
+.cal-grid-cell.today { border-color: var(--gold); }
+.cal-grid-day {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 0.2rem;
+}
+.cal-grid-entries { display: flex; flex-direction: column; gap: 0.15rem; }
+.cal-grid-entry {
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-entry-channel { font-weight: 600; text-transform: capitalize; }
+.cal-entry-time { color: var(--text-dim); margin-left: 0.25rem; }
+
+/* ── Campaign Table View ───────────────────────── */
+.campaign-table-view { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.campaign-table-view .calendar-table th { white-space: nowrap; }
+.campaign-table-view .calendar-table td { font-size: 0.82rem; }
+.campaign-table-view .msg-headline { font-weight: 600; color: var(--text); }
+.campaign-table-view .msg-body {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campaign-table-view .msg-subject { color: var(--info); font-weight: 500; }
+.campaign-table-view .msg-cta { color: var(--gold); font-weight: 500; }
+
+/* ── View Toggle ───────────────────────────────── */
+.view-toggle {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--bg-input);
+  border-radius: var(--radius);
+  padding: 0.15rem;
+}
+.toggle-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--font-body);
+}
+.toggle-btn:hover { color: var(--text); }
+.toggle-btn.active {
+  background: var(--bg-card);
+  color: var(--gold);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+
+/* ── Event Calendar ────────────────────────────── */
+.event-calendar { margin-top: 1rem; }
+.event-cal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.event-cal-header h4 {
+  color: var(--gold);
+  font-family: var(--font-display);
+  margin-bottom: 0;
+}
+.event-grid-cell.has-event { cursor: pointer; }
+.event-grid-cell.has-event:hover { background: var(--bg-hover); }
+.event-grid-entry {
+  padding: 0.15rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  margin-top: 0.1rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-grid-entry.selected {
+  outline: 2px solid var(--gold);
+  outline-offset: -1px;
+}
+.event-timeline { margin-top: 0.5rem; }
+.event-timeline-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.event-timeline-row:hover { background: var(--bg-hover); }
+.event-timeline-date {
+  min-width: 100px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+.event-timeline-day { font-weight: 600; color: var(--text); }
+.event-timeline-content { flex: 1; }
+.event-timeline-title { font-size: 0.88rem; font-weight: 500; }
+.event-timeline-desc { font-size: 0.78rem; color: var(--text-dim); }
+
+/* ── Save Mode Dialog ──────────────────────────── */
+.save-mode-dialog {
+  background: var(--bg-input);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-top: 1rem;
+  animation: fadeSlideUp 0.3s ease;
+}
+.save-mode-dialog h4 {
+  font-family: var(--font-display);
+  color: var(--gold);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.95rem;
+}
+.save-mode-dialog p { font-size: 0.85rem; margin-bottom: 0.75rem; }
+.save-mode-options { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+
+/* ── Knowledge Base ────────────────────────────── */
+.knowledge-base { margin-top: 2rem; }
+.knowledge-base h3 { display: flex; align-items: center; gap: 0.5rem; }
+.kb-search {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.kb-search input { flex: 1; }
+.kb-search select { width: auto; min-width: 160px; }
+.kb-results { display: flex; flex-direction: column; gap: 0.75rem; }
+.kb-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.kb-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Hero Column ───────────────────────────────── */
+.hero-column-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  align-items: center;
+}
+.hero-column-row select { width: auto; min-width: 160px; }
+.hero-column-row input { flex: 1; }
+
+/* ── Training Text Input ───────────────────────── */
+.training-text-input {
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  min-height: 120px;
+  resize: vertical;
+}
+
+/* ── Training Mode Selector ────────────────────── */
+.training-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.training-mode-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+.training-mode-card:hover { border-color: var(--border-light); }
+.training-mode-card.active {
+  border-color: var(--gold);
+  background: var(--gold-glow);
+}
+.training-mode-card h5 {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  color: var(--text);
+}
+.training-mode-card p {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin: 0;
+}
+.training-mode-card.active h5 { color: var(--gold); }
+
+/* ── KPI Selector ──────────────────────────────── */
+.kpi-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.kpi-selector .checkbox-label {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.5rem;
+}
+
+/* ── CRM Headline ──────────────────────────────── */
+.crm-message-headline {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+/* ── Section Type Tabs ─────────────────────────── */
+.section-type-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+.section-type-tab {
+  flex: 1;
+  padding: 0.75rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  font-family: var(--font-body);
+}
+.section-type-tab h5 {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+  color: var(--text);
+}
+.section-type-tab p {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin: 0;
+}
+.section-type-tab:hover { border-color: var(--border-light); }
+.section-type-tab.active {
+  border-color: var(--gold);
+  background: var(--gold-glow);
+}
+.section-type-tab.active h5 { color: var(--gold); }
+
+/* ── Export Button ─────────────────────────────── */
+.export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--font-body);
+}
+.export-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ── Calendar Grid (component class names) ─────── */
+.calendar-grid-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.calendar-grid-header h4 {
+  font-family: var(--font-display);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 1rem;
+  margin-bottom: 0;
+}
+.calendar-grid {
+  display: flex;
+  flex-direction: column;
+}
+.calendar-grid-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.calendar-grid-day-headers {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.calendar-grid-day-header {
+  padding: 0.25rem;
+}
+.calendar-grid-cell {
+  min-height: 85px;
+  border: 1px solid var(--border);
+  padding: 0.35rem;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.calendar-grid-cell.empty { background: var(--bg); opacity: 0.4; }
+.calendar-grid-cell.today { border-color: var(--gold); }
+.calendar-grid-date {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 0.2rem;
+  display: block;
+}
+.calendar-grid-entries { display: flex; flex-direction: column; gap: 0.15rem; }
+.calendar-grid-entry {
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  color: #fff;
+  cursor: default;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+.entry-channel { font-weight: 600; }
+.entry-time { opacity: 0.8; }
+.calendar-grid-legend {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* ── Campaign Table (component class names) ────── */
+.campaign-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.campaign-table-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+.campaign-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.campaign-table th {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-input);
+  border-bottom: 2px solid var(--border);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.campaign-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.table-date { white-space: nowrap; font-weight: 500; }
+.table-time { white-space: nowrap; color: var(--text-dim); }
+.table-headline { font-weight: 600; color: var(--text); max-width: 200px; }
+.table-body { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.table-subject { color: var(--info); font-weight: 500; }
+.table-cta { color: var(--gold); font-weight: 500; }
+
+/* ── View Toggle Buttons ──────────────────────── */
+.view-toggle-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--font-body);
+}
+.view-toggle-btn:hover { color: var(--text); }
+.view-toggle-btn.active {
+  background: var(--bg-card);
+  color: var(--gold);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+
+/* ── Event Grid (calendar view) ──────────────── */
+.event-grid .calendar-grid-entry.event-entry {
+  background: var(--gold-glow);
+  color: var(--gold);
+  cursor: pointer;
+  font-size: 0.65rem;
+  padding: 0.15rem 0.3rem;
+}
+.event-grid .calendar-grid-entry.event-entry:hover { background: var(--gold); color: #fff; }
+.event-grid .calendar-grid-entry.event-entry.selected {
+  outline: 2px solid var(--gold);
+  outline-offset: -1px;
+  background: var(--gold);
+  color: #fff;
+}
+
+/* ── Context Type Card ────────────────────────── */
+.context-type-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.context-type-card:hover { border-color: var(--border-light); }
+.context-type-card.active { border-color: var(--gold); background: var(--gold-glow); }
+.context-type-label { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+.context-type-card.active .context-type-label { color: var(--gold); }
+.context-type-desc { font-size: 0.7rem; color: var(--text-dim); }
+
+/* ── Training Mode Card Labels ────────────────── */
+.training-mode-label { font-size: 0.82rem; font-weight: 600; display: block; color: var(--text); }
+.training-mode-card.active .training-mode-label { color: var(--gold); }
+.training-mode-desc { font-size: 0.72rem; color: var(--text-dim); display: block; margin-top: 0.15rem; }
+
+/* ── Save Mode Option ─────────────────────────── */
+.save-mode-option {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  font-family: var(--font-body);
+  min-width: 180px;
+}
+.save-mode-option:hover { border-color: var(--gold); }
+.save-mode-option strong { display: block; font-size: 0.88rem; color: var(--gold); margin-bottom: 0.25rem; }
+.save-mode-option span { font-size: 0.78rem; color: var(--text-dim); }
+
+/* ── KPI Chip ─────────────────────────────────── */
+.kpi-chip {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.78rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--font-body);
+}
+.kpi-chip:hover { border-color: var(--border-light); color: var(--text); }
+.kpi-chip.active { border-color: var(--gold); background: var(--gold-glow); color: var(--gold); }
+
+/* ── Knowledge Base Search Bar ────────────────── */
+.kb-search-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.kb-search-bar input { flex: 1; }
+.kb-search-bar select { width: auto; min-width: 160px; }
+
+/* ── Directives List ──────────────────────────── */
+.directives-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.directive-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+}
+.directive-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.directive-header:hover { color: var(--gold); }
+
+/* ── Training Panels (bottom section) ─────────── */
+.training-panels {
+  margin-top: 2rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+.training-panel-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Responsive: Phase 2.1 ─────────────────────── */
+@media (max-width: 768px) {
+  .btn, .topbar-tab, .checkbox-label, .radio-label,
+  .crm-channel-tab, .result-tab, .day-btn, .toggle-btn,
+  .view-toggle-btn, .section-type-tab, .kpi-chip,
+  .context-type-card, .save-mode-option {
+    min-height: 44px;
+  }
+  .btn-icon {
+    min-height: 44px;
+    min-width: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .campaign-table-view,
+  .calendar-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cal-grid-cell, .calendar-grid-cell { min-height: 60px; font-size: 0.72rem; }
+  .cal-entry-channel, .entry-channel { font-size: 0.65rem; }
+  .campaign-calendar-grid { overflow-x: auto; min-width: 350px; }
+  .campaign-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .kb-search-bar { flex-direction: column; }
+  .kb-search-bar select { width: 100%; min-width: unset; }
+}
+
+@media (max-width: 640px) {
+  .wizard-steps {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+  .wizard-step {
+    flex-direction: row;
+    gap: 0.75rem;
+    width: 100%;
+  }
+  .wizard-step-label {
+    display: block;
+    font-size: 0.78rem;
+  }
+  .wizard-step:not(:last-child)::after { display: none; }
+  .wizard-step-circle {
+    width: 28px;
+    height: 28px;
+    font-size: 0.7rem;
+    flex-shrink: 0;
+  }
+  .topbar {
+    flex-wrap: wrap;
+    padding: 0.5rem 0.75rem;
+    gap: 0.5rem;
+  }
+  .topbar-brand { order: 1; }
+  .theme-toggle { order: 2; }
+  .topbar-user { order: 3; margin-left: auto; }
+  .topbar-tabs { order: 4; width: 100%; justify-content: center; }
+  .topbar-user span { display: none; }
+  .context-type-grid { grid-template-columns: 1fr 1fr; }
+  .channel-freq-card { padding: 0.75rem; }
+  .day-picker { flex-wrap: wrap; }
+  .day-btn { min-width: 40px; }
+  .section-type-tabs { flex-direction: column; }
+  .training-mode-grid { grid-template-columns: 1fr; }
+  .kb-search { flex-direction: column; }
+  .kb-search select { width: 100%; min-width: unset; }
+  .hero-column-row { flex-direction: column; }
+  .hero-column-row select { width: 100%; min-width: unset; }
+  .save-mode-options { flex-direction: column; }
+  .freq-row { flex-direction: column; align-items: flex-start; }
+  .freq-row select { width: 100%; }
+}

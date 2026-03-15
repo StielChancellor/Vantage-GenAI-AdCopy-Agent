@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import AdResults from '../components/AdResults';
 import GenerationProgress from '../components/GenerationProgress';
 import AppNavbar from '../components/AppNavbar';
+import ContextSelector, { getHotelNameFromContext, isContextValid } from '../components/ContextSelector';
 import { Zap, X, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -22,8 +23,13 @@ const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [context, setContext] = useState({
+    context_type: 'single_property',
+    property_names: [],
+    destination_name: '',
+    generation_mode: 'unified',
+  });
   const [form, setForm] = useState({
-    hotel_name: '',
     offer_name: '',
     inclusions: '',
     reference_urls: [],
@@ -166,6 +172,10 @@ export default function Dashboard() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!isContextValid(context)) {
+      toast.error('Please fill in the property/destination name');
+      return;
+    }
     if (form.reference_urls.length === 0) {
       toast.error('Add at least one reference URL');
       return;
@@ -177,8 +187,11 @@ export default function Dashboard() {
     setLoading(true);
     setResult(null);
     try {
+      const hotelName = getHotelNameFromContext(context);
       const payload = {
         ...form,
+        hotel_name: hotelName,
+        context,
         google_listing_urls: form.google_listing_urls.map(p => p.google_url || ''),
         carousel_mode: form.platforms.includes('fb_carousel') ? carouselMode : undefined,
         carousel_cards: form.platforms.includes('fb_carousel') && carouselMode === 'manual'
@@ -199,7 +212,7 @@ export default function Dashboard() {
     setRefining(true);
     try {
       const payload = {
-        hotel_name: form.hotel_name,
+        hotel_name: getHotelNameFromContext(context),
         offer_name: form.offer_name,
         inclusions: form.inclusions,
         platforms: form.platforms,
@@ -229,10 +242,8 @@ export default function Dashboard() {
           <section className="form-panel">
             <h2>Generate Ad Copy</h2>
             <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label>Hotel Name *</label>
-                <input name="hotel_name" value={form.hotel_name} onChange={handleChange} required placeholder="e.g., The Grand Hyatt" />
-              </div>
+              <ContextSelector value={context} onChange={setContext} />
+
               <div className="form-group">
                 <label>Offer Name *</label>
                 <input name="offer_name" value={form.offer_name} onChange={handleChange} required placeholder="e.g., Summer Escape Package" />

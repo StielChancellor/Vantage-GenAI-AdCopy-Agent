@@ -105,6 +105,12 @@ export default function CRMResults({ content, onRefine, refining }) {
                 </div>
               </div>
 
+              {msg.headline && (
+                <div className="crm-message-headline">
+                  <span className="crm-field-label">Headline:</span> {msg.headline}
+                </div>
+              )}
+
               {msg.subject && (
                 <div className="crm-message-subject">
                   <span className="crm-field-label">Subject:</span> {msg.subject}

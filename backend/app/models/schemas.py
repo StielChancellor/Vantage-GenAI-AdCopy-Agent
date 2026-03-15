@@ -30,20 +30,28 @@ class TokenResponse(BaseModel):
     user: UserOut
 
 
+# ── Context Selector ─────────────────────────────────
+class ContextSelector(BaseModel):
+    context_type: str = "single_property"  # single_property | multi_property | destination | brand_hq
+    property_names: list[str] = []
+    destination_name: Optional[str] = ""
+    generation_mode: Optional[str] = None  # "unified" | "per_property" (multi/hq only)
+
+
 # ── Ad Generation ────────────────────────────────────
 class AdGenerationRequest(BaseModel):
-    hotel_name: str
+    context: Optional[ContextSelector] = None
+    hotel_name: str = ""  # Backward compat — derived from context
     offer_name: str
     inclusions: str
-    reference_urls: list[str]  # Multiple URLs supported
-    google_listing_url: Optional[str] = ""  # Backward compat
-    google_listing_urls: list[str] = []  # Multiple Google listing URLs
+    reference_urls: list[str]
+    google_listing_url: Optional[str] = ""
+    google_listing_urls: list[str] = []
     other_info: Optional[str] = ""
-    campaign_objective: Optional[str] = ""  # Awareness | Consideration | Conversion | ""
+    campaign_objective: Optional[str] = ""
     platforms: list[str] = ["google_search"]
-    # Carousel card configuration
-    carousel_mode: Optional[str] = "suggest"  # "suggest" or "manual"
-    carousel_cards: Optional[list[str]] = None  # User-provided card descriptions
+    carousel_mode: Optional[str] = "suggest"
+    carousel_cards: Optional[list[str]] = None
 
 
 class AdCopyOutput(BaseModel):
@@ -51,7 +59,7 @@ class AdCopyOutput(BaseModel):
     headlines: list[str]
     descriptions: list[str]
     captions: Optional[list[str]] = None
-    card_suggestions: Optional[list[str]] = None  # AI-suggested card visual descriptions
+    card_suggestions: Optional[list[str]] = None
 
 
 class AdGenerationResponse(BaseModel):
@@ -82,11 +90,11 @@ class AdRefinementRequest(BaseModel):
 class AdRefinementResponse(BaseModel):
     hotel_name: str
     variants: list[AdCopyOutput]
-    tokens_used: int  # Total accumulated
-    input_tokens: int = 0  # This call only
-    output_tokens: int = 0  # This call only
+    tokens_used: int
+    input_tokens: int = 0
+    output_tokens: int = 0
     model_used: str
-    time_seconds: float  # Total accumulated
+    time_seconds: float
     generated_at: str
     refinement_count: int = 1
 
@@ -122,32 +130,49 @@ class AuditLogEntry(BaseModel):
     session_id: Optional[str] = None
 
 
-# ── Training ────────────────────────────────────────
+# ── Training (Phase 2.1 — Revised) ──────────────────
 class TrainingUploadResponse(BaseModel):
     session_id: str
-    status: str  # "questions_pending" | "approved" | "error"
-    questions: list[dict] = []  # [{question: str, options: list[str], default: str}]
+    status: str  # "questions_pending" | "ready_for_approval" | "approved" | "error"
+    questions: list[dict] = []
     directive_preview: Optional[dict] = None
 
 
 class TrainingAnswerRequest(BaseModel):
     session_id: str
     answers: list[dict]  # [{question_id: int, answer: str}]
-    approve: bool = False  # If True, finalize and save
+    approve: bool = False
+    save_mode: Optional[str] = None  # "append" | "replace" (only when approve=True)
 
 
-# ── CRM ─────────────────────────────────────────────
+class TrainingSessionLog(BaseModel):
+    session_id: str
+    section_type: str  # "ad_performance" | "brand_usp" | "crm_performance"
+    training_mode: str  # "csv_only" | "text_only" | "csv_and_text"
+    status: str  # "pending" | "approved" | "rejected"
+    save_mode: Optional[str] = None  # "append" | "replace"
+    input_tokens: int = 0
+    output_tokens: int = 0
+    time_seconds: float = 0.0
+    cost_inr: float = 0.0
+    created_at: str = ""
+    completed_at: Optional[str] = None
+
+
+# ── CRM (Phase 2.1 — Revised) ───────────────────────
 class CRMGenerateRequest(BaseModel):
-    hotel_name: str
+    context: Optional[ContextSelector] = None
+    hotel_name: str = ""  # Backward compat
     channels: list[str]  # "whatsapp" | "email" | "app_push"
-    campaign_type: str  # "promotional" | "seasonal" | "event" | "loyalty" | "re-engagement"
+    campaign_type: str
     target_audience: str
     offer_details: str
-    tone: str = "luxurious"  # "formal" | "casual" | "urgent" | "luxurious"
-    events: list[dict] = []  # [{title, date, source, market}]
-    schedule_start: str = ""  # ISO date
-    schedule_end: str = ""  # ISO date
-    frequency: str = "weekly"  # "daily" | "weekly" | "biweekly" | "monthly"
+    tone: str = "luxurious"
+    events: list[dict] = []
+    schedule_start: str = ""
+    schedule_end: str = ""
+    channel_frequencies: dict = {}  # {channel: {days, every_n_weeks, duration_weeks, custom_pattern}}
+    frequency: str = "weekly"  # Fallback if channel_frequencies empty
     inclusions: str = ""
     other_info: str = ""
     reference_urls: list[str] = []
@@ -156,14 +181,14 @@ class CRMGenerateRequest(BaseModel):
 
 class CRMContentOutput(BaseModel):
     channel: str
-    messages: list[dict]  # [{subject?: str, body: str, cta: str, char_count: int}]
-    warnings: list[str] = []  # Soft/strict limit warnings
+    messages: list[dict]  # [{headline?, subject?, body, cta, char_count}]
+    warnings: list[str] = []
 
 
 class CRMGenerateResponse(BaseModel):
     hotel_name: str
     content: list[CRMContentOutput]
-    calendar: list[dict]  # [{day, date, time_range, channel, message_preview}]
+    calendar: list[dict]  # [{day, date, time_range, channel, headline, body, subject, cta, message_preview}]
     tokens_used: int
     input_tokens: int = 0
     output_tokens: int = 0
@@ -181,10 +206,10 @@ class CRMRefineRequest(BaseModel):
 
 # ── Events ──────────────────────────────────────────
 class EventSearchRequest(BaseModel):
-    markets: list[str] = ["India"]  # Default India + user additions
+    markets: list[str] = ["India"]
     date_range_start: str = ""
     date_range_end: str = ""
-    categories: list[str] = []  # "festivals" | "sports" | "conferences" | "holidays"
+    categories: list[str] = []
 
 
 class EventResult(BaseModel):

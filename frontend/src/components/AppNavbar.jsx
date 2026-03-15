@@ -1,10 +1,12 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../contexts/ThemeContext';
 import { logout as apiLogout } from '../services/api';
-import { LogOut, Zap, Settings } from 'lucide-react';
+import { LogOut, Zap, Settings, Sun, Moon } from 'lucide-react';
 
 export default function AppNavbar() {
   const { user, logoutUser } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -39,6 +41,11 @@ export default function AppNavbar() {
           CRM
         </button>
       </div>
+
+      <button className="btn-icon theme-toggle" onClick={toggleTheme}
+        title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+        {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
 
       <div className="topbar-user">
         <span>{user?.full_name}</span>
