@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 
 
 // ─── SPACE CANVAS (stars + shooting stars, mouse-reactive twinkling) ──────────
-function SpaceCanvas() {
+function SpaceCanvas({ isDark = true }) {
   const canvasRef = useRef(null);
   const mouseRef = useRef({ x: -9999, y: -9999 });
 
@@ -50,7 +50,9 @@ function SpaceCanvas() {
         twinkle: Math.random() * Math.PI * 2,
         baseSpeed: 0.010 + Math.random() * 0.018,
         baseAlpha: 0.28 + Math.random() * 0.72,
-        hue: Math.random() > 0.85 ? 'rgba(200,220,255,' : Math.random() > 0.5 ? 'rgba(255,255,255,' : 'rgba(180,200,255,',
+        hue: isDark
+          ? (Math.random() > 0.85 ? 'rgba(200,220,255,' : Math.random() > 0.5 ? 'rgba(255,255,255,' : 'rgba(180,200,255,')
+          : (Math.random() > 0.85 ? 'rgba(15,23,42,' : Math.random() > 0.5 ? 'rgba(30,41,59,' : 'rgba(51,65,85,'),
       });
     }
 
@@ -69,20 +71,31 @@ function SpaceCanvas() {
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Deep space gradient background
+      // Background gradient — dark space or light sky
       const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      bg.addColorStop(0, '#02020e');
-      bg.addColorStop(0.45, '#060618');
-      bg.addColorStop(1, '#030510');
+      if (isDark) {
+        bg.addColorStop(0, '#02020e');
+        bg.addColorStop(0.45, '#060618');
+        bg.addColorStop(1, '#030510');
+      } else {
+        bg.addColorStop(0, '#ffffff');
+        bg.addColorStop(0.45, '#f8fafc');
+        bg.addColorStop(1, '#f1f5f9');
+      }
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Nebula blobs
-      const nebulas = [
+      const nebulas = isDark ? [
         { cx: 0.18, cy: 0.28, r: 340, col: '37,99,235',   a: 0.06  },
         { cx: 0.82, cy: 0.55, r: 280, col: '139,92,246',  a: 0.07  },
         { cx: 0.5,  cy: 0.88, r: 220, col: '236,72,153',  a: 0.038 },
         { cx: 0.65, cy: 0.12, r: 190, col: '6,182,212',   a: 0.032 },
+      ] : [
+        { cx: 0.18, cy: 0.28, r: 340, col: '59,130,246',  a: 0.04  },
+        { cx: 0.82, cy: 0.55, r: 280, col: '139,92,246',  a: 0.035 },
+        { cx: 0.5,  cy: 0.88, r: 220, col: '236,72,153',  a: 0.025 },
+        { cx: 0.65, cy: 0.12, r: 190, col: '6,182,212',   a: 0.02  },
       ];
       nebulas.forEach(n => {
         const grd = ctx.createRadialGradient(
@@ -133,7 +146,7 @@ function SpaceCanvas() {
 
         // Cross sparkle for bright hovered stars
         if (hoverFactor > 0.5 && a > 0.7) {
-          ctx.strokeStyle = `rgba(255,255,255,${hoverFactor * 0.55})`;
+          ctx.strokeStyle = isDark ? `rgba(255,255,255,${hoverFactor * 0.55})` : `rgba(15,23,42,${hoverFactor * 0.4})`;
           ctx.lineWidth = 0.6;
           ctx.beginPath();
           ctx.moveTo(s.x - r * 2.5, s.y);
@@ -157,8 +170,8 @@ function SpaceCanvas() {
           ss.x - Math.cos(ss.angle) * ss.len,
           ss.y - Math.sin(ss.angle) * ss.len
         );
-        tail.addColorStop(0, `rgba(255,255,255,${ss.alpha})`);
-        tail.addColorStop(0.4, `rgba(180,210,255,${ss.alpha * 0.6})`);
+        tail.addColorStop(0, isDark ? `rgba(255,255,255,${ss.alpha})` : `rgba(15,23,42,${ss.alpha * 0.5})`);
+        tail.addColorStop(0.4, isDark ? `rgba(180,210,255,${ss.alpha * 0.6})` : `rgba(51,65,85,${ss.alpha * 0.3})`);
         tail.addColorStop(1, 'transparent');
         ctx.beginPath();
         ctx.moveTo(ss.x, ss.y);
@@ -184,7 +197,7 @@ function SpaceCanvas() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('touchmove', handleTouchMove);
     };
-  }, []);
+  }, [isDark]);
 
   return (
     <canvas
@@ -303,6 +316,7 @@ export default function LandingPage() {
   const [btnText, setBtnText] = useState('Initialize Agent');
   const [btnDisabled, setBtnDisabled] = useState(false);
   const [activeNav, setActiveNav] = useState('home');
+  const [isDark, setIsDark] = useState(true);
   const [pulseRings, setPulseRings] = useState([]);
   const [trailParticles, setTrailParticles] = useState([]);
 
@@ -327,6 +341,24 @@ export default function LandingPage() {
     if (user) navigate('/adcopy');
   }, [user, navigate]);
 
+  // ── IntersectionObserver for scroll-based nav highlighting ─────────────────
+  useEffect(() => {
+    const sectionIds = ['home', 'about', 'docs'];
+    const observerOptions = { root: null, rootMargin: '-40% 0px -40% 0px', threshold: 0 };
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          setActiveNav(entry.target.id);
+        }
+      });
+    }, observerOptions);
+    sectionIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, []);
+
   // ── CSS injection ──────────────────────────────────────────────────────────
   useEffect(() => {
     const style = document.createElement('style');
@@ -339,11 +371,177 @@ export default function LandingPage() {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
         color: #e2e8f0;
         overflow-x: hidden;
+        overflow-y: auto;
         scrollbar-width: thin;
         scrollbar-color: rgba(37,99,235,0.3) transparent;
       }
       .lp-root::-webkit-scrollbar { width: 4px; }
       .lp-root::-webkit-scrollbar-thumb { background: rgba(37,99,235,0.35); border-radius: 3px; }
+
+      /* ── THEME TOGGLE ─────────────────────────────────── */
+      .lp-theme-toggle {
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 9999px;
+        width: 40px; height: 40px;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; font-size: 1.15rem;
+        transition: background 0.2s, border-color 0.2s, transform 0.2s;
+        padding: 0; flex-shrink: 0;
+      }
+      .lp-theme-toggle:hover { background: rgba(255,255,255,0.14); transform: scale(1.08); }
+
+      /* ── LIGHT MODE OVERRIDES ─────────────────────────── */
+      .lp-light-mode { color: #334155; }
+      .lp-light-mode .lp-theme-toggle {
+        background: rgba(15,23,42,0.06);
+        border-color: rgba(15,23,42,0.12);
+      }
+      .lp-light-mode .lp-theme-toggle:hover { background: rgba(15,23,42,0.1); }
+
+      /* Nav */
+      .lp-light-mode .lp-nav {
+        background: rgba(255,255,255,0.85);
+        border-bottom: 1px solid rgba(15,23,42,0.08);
+      }
+      .lp-light-mode .lp-logo { color: #0f172a; }
+      .lp-light-mode .lp-nav-link { color: rgba(51,65,85,0.6); }
+      .lp-light-mode .lp-nav-link:hover,
+      .lp-light-mode .lp-nav-link.active { color: #0891b2; }
+
+      /* Hero text */
+      .lp-light-mode .lp-hero-title { color: #0f172a; }
+      .lp-light-mode .lp-hero-sub { color: #475569; }
+      .lp-light-mode .lp-badge {
+        background: rgba(139,92,246,0.08);
+        border-color: rgba(139,92,246,0.2);
+        color: #7c3aed;
+      }
+      .lp-light-mode .lp-badge-dot {
+        background: #7c3aed;
+        box-shadow: 0 0 8px rgba(124,58,237,0.5);
+      }
+
+      /* CTA button dark inner in light mode */
+      .lp-light-mode .lp-gradient-btn::after { background: #0f172a; }
+
+      /* Spotlight */
+      .lp-light-mode .lp-spotlight-fx {
+        background: radial-gradient(600px circle at var(--lp-mx,50%) var(--lp-my,50%), rgba(6,182,212,0.03), transparent 40%);
+      }
+
+      /* Robot — darker metallic in light mode */
+      .lp-light-mode .lp-glossy {
+        background: linear-gradient(145deg, #94a3b8 0%, #64748b 10%, #475569 25%, #334155 45%, #1e293b 65%, #0f172a 100%);
+        box-shadow:
+          inset 8px 16px 32px rgba(255,255,255,0.22),
+          inset 2px 4px 10px rgba(150,200,255,0.08),
+          inset -8px -10px 28px rgba(0,0,0,0.6),
+          0 0 0 1.5px rgba(6,182,212,0.4),
+          0 0 18px rgba(6,182,212,0.15),
+          0 0 45px rgba(6,182,212,0.08),
+          0 0 60px rgba(139,92,246,0.05),
+          0 24px 50px rgba(0,0,0,0.25);
+        border-color: rgba(100,116,139,0.3);
+      }
+      .lp-light-mode .lp-robot-visor {
+        border-color: rgba(6,182,212,0.3);
+      }
+      .lp-light-mode .lp-halo-1 { border-color: rgba(6,182,212,0.2); }
+      .lp-light-mode .lp-halo-2 {
+        border-color: rgba(139,92,246,0.05);
+        border-top-color: rgba(139,92,246,0.35);
+        box-shadow: 0 0 25px rgba(139,92,246,0.04);
+      }
+
+      /* Section text */
+      .lp-light-mode .lp-section-title { color: #0f172a; }
+      .lp-light-mode .lp-section-sub { color: #475569; }
+      .lp-light-mode .lp-about-eyebrow {
+        color: #7c3aed;
+        background: rgba(139,92,246,0.06);
+        border-color: rgba(139,92,246,0.15);
+      }
+
+      /* Bento cards */
+      .lp-light-mode .lp-bento-card {
+        background: rgba(255,255,255,0.85);
+        border-color: rgba(15,23,42,0.08);
+        backdrop-filter: blur(16px);
+      }
+      .lp-light-mode .lp-bento-card:hover { border-color: rgba(6,182,212,0.2); box-shadow: 0 16px 40px rgba(6,182,212,0.06); }
+      .lp-light-mode .lp-bento-card:nth-child(even):hover { border-color: rgba(139,92,246,0.2); box-shadow: 0 16px 40px rgba(139,92,246,0.06); }
+      .lp-light-mode .lp-bento-card h3 { color: #0f172a; }
+      .lp-light-mode .lp-bento-card-sub { color: #475569; }
+      .lp-light-mode .lp-bento-feature-title { color: #1e293b; }
+      .lp-light-mode .lp-bento-feature-desc { color: #64748b; }
+
+      /* Docs section */
+      .lp-light-mode .lp-docs-eyebrow {
+        color: #0891b2;
+        background: rgba(6,182,212,0.06);
+        border-color: rgba(6,182,212,0.15);
+      }
+      .lp-light-mode .lp-arch-flow {
+        background: rgba(255,255,255,0.85);
+        border-color: rgba(15,23,42,0.08);
+      }
+      .lp-light-mode .lp-arch-title { color: rgba(51,65,85,0.5); }
+      .lp-light-mode .lp-arch-node {
+        background: rgba(248,250,252,0.95);
+        border-color: rgba(15,23,42,0.1);
+        color: #334155;
+      }
+      .lp-light-mode .lp-arch-node.lp-arch-primary { background: rgba(6,182,212,0.06); border-color: rgba(6,182,212,0.2); color: #0891b2; }
+      .lp-light-mode .lp-arch-node.lp-arch-ai { background: rgba(139,92,246,0.06); border-color: rgba(139,92,246,0.2); color: #7c3aed; }
+      .lp-light-mode .lp-arch-node.lp-arch-data { background: rgba(6,182,212,0.04); border-color: rgba(6,182,212,0.15); color: #0e7490; }
+      .lp-light-mode .lp-arch-line-v { background: rgba(15,23,42,0.08); }
+      .lp-light-mode .lp-arch-split::before {
+        border-color: rgba(15,23,42,0.08);
+      }
+      .lp-light-mode .lp-docs-card {
+        background: rgba(255,255,255,0.85);
+        border-color: rgba(15,23,42,0.08);
+      }
+      .lp-light-mode .lp-docs-card:hover { border-color: rgba(15,23,42,0.14); box-shadow: 0 16px 40px rgba(0,0,0,0.06); }
+      .lp-light-mode .lp-docs-card h3 { color: #0f172a; }
+      .lp-light-mode .lp-docs-card-sub { color: #475569; }
+      .lp-light-mode .lp-docs-feature-mono { color: #1e293b; }
+      .lp-light-mode .lp-docs-feature-desc { color: #64748b; }
+      .lp-light-mode .lp-docs-feature-bullet {
+        background: rgba(15,23,42,0.04);
+        color: rgba(51,65,85,0.5);
+      }
+
+      /* Footer */
+      .lp-light-mode .lp-footer-cta { border-top-color: rgba(15,23,42,0.06); }
+      .lp-light-mode .lp-footer-cta-title { color: #0f172a; }
+      .lp-light-mode .lp-footer-cta-sub { color: #475569; }
+      .lp-light-mode .lp-footer-bottom { color: rgba(100,116,139,0.6); }
+
+      /* Pulse ring light mode */
+      .lp-light-mode .lp-pulse-ring { border-color: rgba(139,92,246,0.3); }
+
+      /* Login overlay light mode */
+      .lp-light-mode .lp-login-card {
+        background: rgba(255,255,255,0.97);
+        border-color: rgba(6,182,212,0.18);
+        box-shadow: 0 0 80px rgba(6,182,212,0.06), 0 20px 60px rgba(0,0,0,0.12);
+      }
+      .lp-light-mode .lp-login-title { color: #0f172a; }
+      .lp-light-mode .lp-login-sub { color: #475569; }
+      .lp-light-mode .lp-form-group label { color: #475569; }
+      .lp-light-mode .lp-form-group input {
+        background: rgba(15,23,42,0.04);
+        border-color: rgba(15,23,42,0.12);
+        color: #0f172a;
+      }
+      .lp-light-mode .lp-form-group input::placeholder { color: rgba(100,116,139,0.5); }
+      .lp-light-mode .lp-login-close {
+        background: rgba(15,23,42,0.06);
+        color: rgba(51,65,85,0.5);
+      }
+      .lp-light-mode .lp-login-close:hover { background: rgba(15,23,42,0.1); color: #0f172a; }
 
       /* ── SPOTLIGHT ───────────────────────────────────── */
       .lp-spotlight-fx {
@@ -391,7 +589,7 @@ export default function LandingPage() {
         position: relative; z-index: 2;
         min-height: 100vh;
         display: flex; align-items: center; justify-content: center;
-        padding: 100px 48px 48px;
+        padding: 80px 48px 32px;
       }
       .lp-hero-container {
         display: flex; align-items: center; justify-content: space-between;
@@ -468,7 +666,7 @@ export default function LandingPage() {
       .lp-hero-visual {
         flex: 1; position: relative;
         display: flex; justify-content: center; align-items: center;
-        height: 580px; perspective: 1200px;
+        height: 500px; perspective: 1200px;
         animation: lpFadeUp 1s ease-out 0.5s both;
       }
 
@@ -955,9 +1153,10 @@ export default function LandingPage() {
       @media (max-width: 768px) {
         .lp-nav            { padding:14px 20px; }
         .lp-nav-links      { display:none; }
+        .lp-theme-toggle   { width:36px; height:36px; font-size:1rem; }
         .lp-hero-section   { padding:76px 20px 24px; }
-        .lp-section        { padding:64px 20px; }
-        .lp-footer-cta     { padding:60px 20px 44px; }
+        .lp-section        { padding:48px 16px; }
+        .lp-footer-cta     { padding:48px 16px 36px; }
         .lp-robot-scaler   { transform:scale(0.62); }
         .lp-hero-visual    { height:320px; }
         .lp-halo-1         { width:300px; height:300px; }
@@ -1147,9 +1346,9 @@ export default function LandingPage() {
 
 
   return (
-    <div className="lp-root">
+    <div className={`lp-root${isDark ? '' : ' lp-light-mode'}`}>
       {/* Space background */}
-      <SpaceCanvas />
+      <SpaceCanvas isDark={isDark} />
 
       {/* Spotlight */}
       <div className="lp-spotlight-fx" />
@@ -1193,8 +1392,19 @@ export default function LandingPage() {
             </button>
           ))}
         </div>
-        {/* Right side intentionally empty — no toggle, no sign-in */}
-        <div />
+        {/* Day/Night toggle */}
+        <button
+          className="lp-theme-toggle"
+          onClick={() => setIsDark(prev => !prev)}
+          aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={isDark ? 'Light mode' : 'Dark mode'}
+        >
+          {isDark ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          )}
+        </button>
       </nav>
 
       {/* ── HERO ── */}
@@ -1209,14 +1419,12 @@ export default function LandingPage() {
             </div>
 
             <h1 className="lp-hero-title">
-              Omnichannel AI.<br />
-              <span className="lp-title-gradient">Engineered to convert.</span>
+              AI Agent for <span className="lp-title-gradient">Ad Copy &amp; CRM Calendars.</span>
             </h1>
 
             <p className="lp-hero-sub">
-              Transform historical performance data into high-converting Ad Copy and
-              personalized CRM Marketing Calendars — in seconds. Powered by Claude AI
-              and real-time Firestore RAG.
+              Generate high-converting ad copies across Google, Meta, YouTube and more.
+              Plan full-funnel CRM campaigns with intelligent marketing calendars — all from a single brief.
             </p>
 
             <div className="lp-cta-wrap">
@@ -1470,7 +1678,7 @@ export default function LandingPage() {
               <div className="lp-arch-row" style={{gap:'16px'}}>
                 <div className="lp-arch-node lp-arch-ai">
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
-                  Claude AI Engine
+                  AI Engine
                 </div>
                 <div className="lp-arch-node lp-arch-data">
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
@@ -1510,7 +1718,7 @@ export default function LandingPage() {
                   <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
                   <div className="lp-docs-feature-text">
                     <span className="lp-docs-feature-mono">Multi-Model Support</span>
-                    <span className="lp-docs-feature-desc">Switch between Claude Sonnet, Haiku, and Opus models via admin settings. Balance speed vs. quality vs. cost per use case.</span>
+                    <span className="lp-docs-feature-desc">Switch between multiple AI models via admin settings. Balance speed vs. quality vs. cost per use case.</span>
                   </div>
                 </li>
                 <li className="lp-docs-feature-item">
@@ -1718,10 +1926,10 @@ export default function LandingPage() {
           Join teams shipping better campaigns, faster — with Vantage GenAI.
         </p>
         <button className="lp-gradient-btn" onClick={triggerTakeoff} disabled={btnDisabled}>
-          <span>Get Started Free</span>
+          <span>Initialize Agent</span>
         </button>
         <div className="lp-footer-bottom">
-          © 2025 Vantage GenAI · Powered by Anthropic Claude · Built on GCP
+          &copy; 2025 Vantage GenAI
         </div>
       </section>
     </div>
