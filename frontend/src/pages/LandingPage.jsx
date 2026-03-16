@@ -110,16 +110,21 @@ function SpaceCanvas() {
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('touchmove', handleTouchMove, { passive: true });
 
-    // Dense starfield — 420 stars
-    for (let i = 0; i < 420; i++) {
+    // Dense starfield — 480 stars with parallax drift
+    for (let i = 0; i < 480; i++) {
+      const r = Math.random() * 1.8 + 0.2;
+      // Bigger/brighter stars drift faster (parallax: they're "closer")
+      const driftSpeed = 0.04 + r * 0.06;
+      const angle = Math.random() * Math.PI * 2;
       stars.push({
         x: Math.random() * window.innerWidth,
         y: Math.random() * window.innerHeight,
-        r: Math.random() * 1.6 + 0.25,
+        r,
+        vx: Math.cos(angle) * driftSpeed,
+        vy: Math.sin(angle) * driftSpeed,
         twinkle: Math.random() * Math.PI * 2,
-        baseSpeed: 0.012 + Math.random() * 0.022,
-        baseAlpha: 0.3 + Math.random() * 0.7,
-        // subtle warm/cool tint variety
+        baseSpeed: 0.010 + Math.random() * 0.018,
+        baseAlpha: 0.28 + Math.random() * 0.72,
         hue: Math.random() > 0.85 ? 'rgba(200,220,255,' : Math.random() > 0.5 ? 'rgba(255,255,255,' : 'rgba(180,200,255,',
       });
     }
@@ -171,36 +176,45 @@ function SpaceCanvas() {
       const hoverRadius = 160;
 
       stars.forEach(s => {
+        // Drift — wrap around edges with a small margin
+        s.x += s.vx;
+        s.y += s.vy;
+        const pad = 4;
+        if (s.x < -pad) s.x = canvas.width + pad;
+        else if (s.x > canvas.width + pad) s.x = -pad;
+        if (s.y < -pad) s.y = canvas.height + pad;
+        else if (s.y > canvas.height + pad) s.y = -pad;
+
+        // Mouse hover reactivity
         const dx = s.x - mx;
         const dy = s.y - my;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const hoverFactor = dist < hoverRadius ? 1 - dist / hoverRadius : 0;
 
         // Twinkle speed ramps up near cursor
-        const speed = s.baseSpeed + hoverFactor * 0.18;
-        s.twinkle += speed;
+        s.twinkle += s.baseSpeed + hoverFactor * 0.20;
 
         // Alpha pulses stronger near cursor
-        const pulseRange = 0.42 + hoverFactor * 0.55;
-        const a = Math.max(0.05, s.baseAlpha * (0.58 + Math.sin(s.twinkle) * pulseRange));
+        const pulseRange = 0.40 + hoverFactor * 0.58;
+        const a = Math.max(0.04, s.baseAlpha * (0.56 + Math.sin(s.twinkle) * pulseRange));
 
         // Slight size boost on hover
-        const r = s.r + hoverFactor * 1.2;
+        const r = s.r + hoverFactor * 1.4;
 
         ctx.beginPath();
         ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
         ctx.fillStyle = `${s.hue}${a})`;
         ctx.fill();
 
-        // Tiny cross sparkle for the brightest stars near cursor
-        if (hoverFactor > 0.55 && a > 0.75) {
-          ctx.strokeStyle = `rgba(255,255,255,${hoverFactor * 0.5})`;
+        // Cross sparkle for bright hovered stars
+        if (hoverFactor > 0.5 && a > 0.7) {
+          ctx.strokeStyle = `rgba(255,255,255,${hoverFactor * 0.55})`;
           ctx.lineWidth = 0.6;
           ctx.beginPath();
-          ctx.moveTo(s.x - r * 2, s.y);
-          ctx.lineTo(s.x + r * 2, s.y);
-          ctx.moveTo(s.x, s.y - r * 2);
-          ctx.lineTo(s.x, s.y + r * 2);
+          ctx.moveTo(s.x - r * 2.5, s.y);
+          ctx.lineTo(s.x + r * 2.5, s.y);
+          ctx.moveTo(s.x, s.y - r * 2.5);
+          ctx.lineTo(s.x, s.y + r * 2.5);
           ctx.stroke();
         }
       });
@@ -564,10 +578,47 @@ export default function LandingPage() {
       }
       @keyframes lpRobotFloat { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-20px);} }
 
+      /* Shiny polished metal — visible against dark space */
       .lp-glossy {
-        background: linear-gradient(145deg, #334155 0%, #0f172a 40%, #020617 100%);
-        box-shadow: inset 5px 10px 20px rgba(255,255,255,0.17), inset -10px -10px 30px rgba(0,0,0,0.93), 0 20px 40px rgba(0,0,0,0.35);
-        border: 1px solid rgba(255,255,255,0.08);
+        background: linear-gradient(
+          145deg,
+          #7a9bb5 0%,    /* bright steel-blue top-left specular */
+          #4a6d8a 10%,
+          #2c4a62 25%,
+          #1a2f42 45%,
+          #0e1d2e 65%,
+          #060f1a 100%
+        );
+        box-shadow:
+          /* Strong top-left specular highlight */
+          inset 8px 16px 32px rgba(255,255,255,0.38),
+          /* Soft secondary fill */
+          inset 2px 4px 10px rgba(150,200,255,0.12),
+          /* Deep shadow bottom-right */
+          inset -8px -10px 28px rgba(0,0,0,0.97),
+          /* Cyan rim light — separates robot from dark bg */
+          0 0 0 1.5px rgba(6,182,212,0.55),
+          0 0 18px rgba(6,182,212,0.28),
+          0 0 45px rgba(6,182,212,0.12),
+          /* Purple accent rim on back */
+          0 0 60px rgba(139,92,246,0.08),
+          /* Depth shadow */
+          0 24px 50px rgba(0,0,0,0.7);
+        border: 1px solid rgba(150,210,240,0.22);
+      }
+
+      /* Glowing platform beneath robot */
+      .lp-robot-assembly::after {
+        content: '';
+        position: absolute;
+        bottom: -30px; left: 50%;
+        transform: translateX(-50%);
+        width: 180px; height: 24px;
+        background: radial-gradient(ellipse at center, rgba(6,182,212,0.35) 0%, rgba(139,92,246,0.12) 50%, transparent 75%);
+        filter: blur(8px);
+        border-radius: 50%;
+        z-index: -2;
+        pointer-events: none;
       }
 
       .lp-robot-head {
@@ -576,40 +627,65 @@ export default function LandingPage() {
         display: flex; justify-content: center; align-items: center; z-index: 3;
         transition: transform 0.05s linear;
       }
+      /* Large primary specular — upper-left gleam */
       .lp-robot-head::before {
-        content: ''; position: absolute; top: 5%; left: 10%; width: 60%; height: 30%;
-        background: radial-gradient(ellipse at center, rgba(255,255,255,0.36) 0%, transparent 70%);
-        border-radius: 50%; transform: rotate(-15deg); pointer-events: none; z-index: 5;
+        content: ''; position: absolute; top: 4%; left: 8%; width: 55%; height: 32%;
+        background: radial-gradient(ellipse at 35% 35%, rgba(255,255,255,0.62) 0%, rgba(200,235,255,0.28) 40%, transparent 72%);
+        border-radius: 50%; transform: rotate(-18deg); pointer-events: none; z-index: 5;
+      }
+      /* Secondary smaller gleam bottom-right */
+      .lp-robot-head::after {
+        content: ''; position: absolute; bottom: 12%; right: 12%; width: 22%; height: 14%;
+        background: radial-gradient(ellipse at center, rgba(255,255,255,0.28) 0%, transparent 70%);
+        border-radius: 50%; pointer-events: none; z-index: 5;
       }
 
+      /* Teal-tinted glassy visor */
       .lp-robot-visor {
-        width: 190px; height: 90px; background: #000; border-radius: 45px;
-        box-shadow: inset 0 10px 20px rgba(0,0,0,1), inset 0 0 10px rgba(6,182,212,0.18), 0 2px 5px rgba(255,255,255,0.07);
+        width: 190px; height: 90px;
+        background: linear-gradient(160deg, #001018 0%, #000a14 60%, #000608 100%);
+        border-radius: 45px;
+        box-shadow:
+          inset 0 8px 24px rgba(0,0,0,1),
+          inset 0 0 20px rgba(6,182,212,0.3),
+          inset 0 0 40px rgba(6,182,212,0.1),
+          0 0 12px rgba(6,182,212,0.25),
+          0 3px 6px rgba(255,255,255,0.1);
         position: relative; display: flex; justify-content: center; align-items: center; gap: 20px; overflow: hidden;
+        border: 1px solid rgba(6,182,212,0.2);
       }
       .lp-robot-visor::after {
-        content: ''; position: absolute; top: 2px; left: 5%; width: 90%; height: 40px;
-        background: linear-gradient(to bottom, rgba(255,255,255,0.12), transparent);
+        content: ''; position: absolute; top: 2px; left: 5%; width: 90%; height: 42px;
+        background: linear-gradient(to bottom, rgba(180,240,255,0.18), rgba(100,200,255,0.06), transparent);
         border-radius: 40px 40px 0 0; pointer-events: none;
       }
 
       .lp-eye-container { display:flex; gap:25px; position:relative; z-index:2; transition:transform 0.05s linear; }
       .lp-robot-eye {
-        width: 25px; height: 35px; border-radius: 20px; background: #fff;
-        box-shadow: 0 0 10px #fff, 0 0 20px #06b6d4, 0 0 40px #06b6d4;
+        width: 26px; height: 36px; border-radius: 20px; background: #e8f8ff;
+        box-shadow:
+          0 0 8px #fff,
+          0 0 18px #06b6d4,
+          0 0 35px #06b6d4,
+          0 0 65px rgba(6,182,212,0.6),
+          inset 0 0 8px rgba(6,182,212,0.4);
         animation: lpEyeBlink 4s infinite;
         transition: height 0.2s, background 0.2s, box-shadow 0.2s;
       }
-      @keyframes lpEyeBlink { 0%,90%,100%{transform:scaleY(1);} 95%{transform:scaleY(0.1);} }
+      @keyframes lpEyeBlink { 0%,90%,100%{transform:scaleY(1);} 95%{transform:scaleY(0.08);} }
 
+      /* Neck — brighter to be visible */
       .lp-robot-neck {
-        width: 60px; height: 30px; background: #1e293b; border-radius: 10px;
+        width: 60px; height: 30px;
+        background: linear-gradient(to bottom, #2a4a62, #162536);
+        border-radius: 10px;
         position: absolute; top: 180px; left: 50%; margin-left: -30px; z-index: 2;
-        box-shadow: inset 0 5px 10px rgba(0,0,0,0.8);
+        box-shadow: inset 0 4px 8px rgba(0,0,0,0.7), 0 0 0 1px rgba(6,182,212,0.3);
       }
       .lp-robot-neck::after {
         content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-        width: 80%; height: 4px; background: #06b6d4; box-shadow: 0 0 10px #06b6d4; border-radius: 2px;
+        width: 80%; height: 4px; background: #06b6d4;
+        box-shadow: 0 0 12px #06b6d4, 0 0 24px rgba(6,182,212,0.5); border-radius: 2px;
       }
 
       .lp-robot-torso {
@@ -618,16 +694,16 @@ export default function LandingPage() {
         display: flex; justify-content: center; transition: transform 0.05s linear;
       }
       .lp-robot-core {
-        width: 40px; height: 40px; background: #000; border-radius: 50%; margin-top: 30px;
-        box-shadow: inset 0 5px 10px rgba(0,0,0,0.8), 0 2px 5px rgba(255,255,255,0.08);
+        width: 44px; height: 44px; background: #000; border-radius: 50%; margin-top: 28px;
+        box-shadow: inset 0 4px 10px rgba(0,0,0,0.9), 0 0 0 2px rgba(139,92,246,0.5), 0 0 16px rgba(139,92,246,0.4);
         display: flex; justify-content: center; align-items: center;
       }
       .lp-robot-core-light {
-        width: 15px; height: 15px; background: #8b5cf6; border-radius: 50%;
-        box-shadow: 0 0 15px #8b5cf6, 0 0 30px #8b5cf6;
+        width: 18px; height: 18px; background: #a855f7; border-radius: 50%;
+        box-shadow: 0 0 12px #a855f7, 0 0 28px #8b5cf6, 0 0 50px rgba(139,92,246,0.7);
         animation: lpPulseCore 2s infinite alternate; transition: all 0.3s ease;
       }
-      @keyframes lpPulseCore { from{transform:scale(0.9);opacity:0.7;} to{transform:scale(1.1);opacity:1;} }
+      @keyframes lpPulseCore { from{transform:scale(0.88);opacity:0.7;box-shadow:0 0 10px #a855f7,0 0 22px #8b5cf6;} to{transform:scale(1.12);opacity:1;box-shadow:0 0 18px #a855f7,0 0 40px #8b5cf6,0 0 70px rgba(139,92,246,0.5);} }
 
       .lp-robot-arm {
         position: absolute; width: 45px; height: 110px; border-radius: 25px; top: 215px; z-index: 4;
@@ -678,12 +754,27 @@ export default function LandingPage() {
       .lp-ignited .lp-torso-thruster .lp-flame-core  { height:250px; }
       .lp-ignited .lp-torso-thruster .lp-flame-plume { height:400px; }
       @keyframes lpVFlicker { 0%{transform:scaleY(0.9) scaleX(0.95);opacity:0.8;} 100%{transform:scaleY(1.1) scaleX(1.05);opacity:1;} }
-      @keyframes lpIronManTakeoff {
-        0%{transform:translateY(0);}
-        15%{transform:translateY(40px);animation-timing-function:cubic-bezier(0.8,0,1,1);}
-        100%{transform:translateY(-2200px);}
+      /* Natural physics takeoff — squash → compress → liftoff → exponential acceleration */
+      @keyframes lpNaturalTakeoff {
+        /* Idle */
+        0%   { transform: translateY(0px) scaleX(1)    scaleY(1); }
+        /* Thrusters build — robot compresses down (weight + thrust) */
+        6%   { transform: translateY(6px)  scaleX(1.04) scaleY(0.95); }
+        13%  { transform: translateY(14px) scaleX(1.07) scaleY(0.90); }
+        /* Fighting gravity — slight bounce before commit */
+        22%  { transform: translateY(10px) scaleX(1.05) scaleY(0.93); }
+        /* Breaks free — first lunge upward */
+        32%  { transform: translateY(-18px) scaleX(0.96) scaleY(1.06); }
+        /* Brief hover — thrusters at full, about to accelerate */
+        40%  { transform: translateY(-30px) scaleX(0.97) scaleY(1.04);
+               animation-timing-function: cubic-bezier(0.42, 0, 0.98, 0.52); }
+        /* Exponential climb — gets faster every frame */
+        58%  { transform: translateY(-200px) scaleX(0.98) scaleY(1.02); }
+        72%  { transform: translateY(-600px) scaleX(0.99) scaleY(1.01); }
+        85%  { transform: translateY(-1300px) scaleX(1) scaleY(1); }
+        100% { transform: translateY(-2800px) scaleX(1) scaleY(1); }
       }
-      .lp-flying { animation:lpIronManTakeoff 1.2s forwards !important; }
+      .lp-flying { animation: lpNaturalTakeoff 2.2s forwards !important; }
 
       .lp-floor-shadow {
         position: absolute; bottom: -80px; width: 200px; height: 20px;
@@ -979,42 +1070,50 @@ export default function LandingPage() {
       coreLight.style.boxShadow = '0 0 30px #fff, 0 0 60px #06b6d4, 0 0 100px #8b5cf6';
     }
 
+    // Phase 1: 300ms — eyes glow, core charges (already happening above)
+    // Phase 2: 300ms → 900ms — shake + warm up engines (600ms of shaking feels right)
     setTimeout(() => {
       assembly?.classList.add('lp-shaking', 'lp-warming-up');
-    }, 380);
+    }, 300);
 
+    // Phase 3: 900ms — ignite + launch (2.2s flight animation)
     setTimeout(() => {
       assembly?.classList.remove('lp-shaking', 'lp-warming-up');
       assembly?.classList.add('lp-ignited', 'lp-flying');
       if (floorShadowRef.current) floorShadowRef.current.style.opacity = '0';
-      if (shockwaveRef.current)   shockwaveRef.current.classList.add('lp-shockwave-go');
 
-      // Trail particles
+      // Shockwave fires when robot breaks free (~40% into animation = ~880ms after launch)
+      setTimeout(() => {
+        if (shockwaveRef.current) shockwaveRef.current.classList.add('lp-shockwave-go');
+      }, 880);
+
+      // Trail particles — spawn over first 1.5s of flight
       if (assembly) {
         const rect = assembly.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
-        for (let i = 0; i < 38; i++) {
+        for (let i = 0; i < 55; i++) {
           setTimeout(() => {
             const pid = particleIdRef.current++;
-            const px  = cx + (Math.random() - 0.5) * 60;
-            const py  = cy + (Math.random() - 0.5) * 80;
-            const size = 3 + Math.random() * 7;
-            const isBlue = Math.random() > 0.5;
-            const dur  = 0.9 + Math.random() * 0.8;
-            const tx   = (Math.random() - 0.5) * 80;
-            const ty   = -30 - Math.random() * 80;
-            setTrailParticles(prev => [...prev.slice(-50), { id: pid, px, py, size, isBlue, dur, tx, ty }]);
-            setTimeout(() => setTrailParticles(prev => prev.filter(p => p.id !== pid)), dur * 1000 + 200);
+            const px  = cx + (Math.random() - 0.5) * 70;
+            const py  = cy + i * -6 + (Math.random() - 0.5) * 40;
+            const size = 2 + Math.random() * 8;
+            const isBlue = Math.random() > 0.4;
+            const dur  = 0.8 + Math.random() * 1.0;
+            const tx   = (Math.random() - 0.5) * 100;
+            const ty   = -20 - Math.random() * 60;
+            setTrailParticles(prev => [...prev.slice(-60), { id: pid, px, py, size, isBlue, dur, tx, ty }]);
+            setTimeout(() => setTrailParticles(prev => prev.filter(p => p.id !== pid)), dur * 1000 + 300);
           }, i * 28);
         }
       }
 
+      // Login appears after robot is fully gone (2.2s flight + small buffer)
       setTimeout(() => {
         setBtnText('Agent Active');
-        setTimeout(() => { setShowLogin(true); resetRobot(); }, 600);
-      }, 1200);
-    }, 1400);
+        setTimeout(() => { setShowLogin(true); resetRobot(); }, 500);
+      }, 2400);
+    }, 900);
   }, []);
 
   const resetRobot = useCallback(() => {
