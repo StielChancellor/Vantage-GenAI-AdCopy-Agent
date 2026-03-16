@@ -4,81 +4,6 @@ import { useAuth } from '../hooks/useAuth';
 import { login } from '../services/api';
 import toast from 'react-hot-toast';
 
-// ─── FEATURE DATA ─────────────────────────────────────────────────────────────
-const FEATURES = [
-  {
-    icon: '🎯',
-    title: 'AI Ad Copy Generation',
-    desc: 'Generate high-converting ad copy in seconds. Upload your brand brief, USPs, and past performance data — Vantage outputs multiple variants optimized per platform.',
-    tag: 'Marketer',
-  },
-  {
-    icon: '📅',
-    title: 'CRM Marketing Calendar',
-    desc: 'Plan, schedule, and track every campaign in a beautiful calendar. From acquisition pushes to retention flows — never miss a critical touchpoint.',
-    tag: 'Marketer',
-  },
-  {
-    icon: '🌐',
-    title: 'Multi-Platform Orchestration',
-    desc: 'One brief, every channel. Output tailored copy for Meta, Google, LinkedIn, TikTok, and more with platform-specific tone and format rules built in.',
-    tag: 'Marketer',
-  },
-  {
-    icon: '💬',
-    title: 'Smart Brief Copilot',
-    desc: 'Chat naturally with your AI marketing partner. Describe your campaign in plain English — the Copilot extracts intent, crafts a structured brief, and generates assets.',
-    tag: 'Marketer',
-  },
-  {
-    icon: '🔍',
-    title: 'Intent Capture Engine',
-    desc: 'Every conversation captures audience intent signals. Build smarter retargeting and lookalike segments from real interaction data without extra data pipelines.',
-    tag: 'Marketer',
-  },
-  {
-    icon: '📊',
-    title: 'Real-Time Performance Insights',
-    desc: 'Track CTR, ROAS, impressions, and conversion rates live. AI surfaces anomalies and recommends optimizations before you notice the drop.',
-    tag: 'Marketer',
-  },
-  {
-    icon: '🧠',
-    title: 'RAG-Powered Knowledge Engine',
-    desc: 'Firestore-backed Retrieval Augmented Generation indexes your historical campaign data, brand guidelines, and competitor insights for contextual, brand-accurate output.',
-    tag: 'CIO',
-  },
-  {
-    icon: '🔐',
-    title: 'Secure Multi-Tenant Architecture',
-    desc: 'Role-based access control with JWT auth. Isolated data namespacing per property. Admin panel with full audit trail, user management, and training controls.',
-    tag: 'CIO',
-  },
-  {
-    icon: '📍',
-    title: 'Geo-Targeted Campaigns',
-    desc: 'Google Maps API integration delivers real-time location intelligence. Combine geo-signals with intent data for hyper-local campaign precision.',
-    tag: 'CIO',
-  },
-  {
-    icon: '⚡',
-    title: 'Cloud-Native & Scalable',
-    desc: 'Deployed on GCP Cloud Run with Firestore as the primary data layer. Zero cold-start latency in production. Auto-scales to handle peak campaign launches.',
-    tag: 'CIO',
-  },
-  {
-    icon: '🤖',
-    title: 'Anthropic Claude AI Core',
-    desc: 'Powered by Claude Sonnet — the state-of-the-art model for long-context reasoning, structured output, and instruction following at production grade.',
-    tag: 'CIO',
-  },
-  {
-    icon: '🛠️',
-    title: 'Full Admin Control Center',
-    desc: 'Manage users, upload training data, review audit logs, configure system-wide settings, and monitor agent activity — all from a unified admin dashboard.',
-    tag: 'CIO',
-  },
-];
 
 // ─── SPACE CANVAS (stars + shooting stars, mouse-reactive twinkling) ──────────
 function SpaceCanvas() {
@@ -380,7 +305,6 @@ export default function LandingPage() {
   const [activeNav, setActiveNav] = useState('home');
   const [pulseRings, setPulseRings] = useState([]);
   const [trailParticles, setTrailParticles] = useState([]);
-  const [filterTag, setFilterTag] = useState('All');
 
   // Robot refs
   const assemblyRef   = useRef(null);
@@ -827,50 +751,121 @@ export default function LandingPage() {
       }
       .lp-section-sub { font-size:1.05rem; color:rgba(148,163,184,0.82); max-width:580px; margin:0 auto; line-height:1.6; }
 
-      /* ── FEATURE CARDS ───────────────────────────────── */
-      .lp-tag-filters { display:flex; justify-content:center; gap:10px; margin-bottom:44px; flex-wrap:wrap; }
-      .lp-tag-btn {
-        padding:6px 18px; border-radius:999px; font-size:0.8rem; font-weight:600;
-        border:1px solid rgba(255,255,255,0.1); background:transparent;
-        color:rgba(148,163,184,0.8); cursor:pointer; transition:all 0.2s; font-family:inherit;
-        -webkit-tap-highlight-color:transparent;
+      /* ── ABOUT EYEBROW ───────────────────────────────── */
+      .lp-about-eyebrow {
+        display:inline-block; color:#a78bfa; font-size:0.8rem; font-weight:700;
+        letter-spacing:1px; text-transform:uppercase; margin-bottom:14px;
+        background:rgba(139,92,246,0.1); padding:5px 14px; border-radius:100px;
+        border:1px solid rgba(139,92,246,0.2);
       }
-      .lp-tag-btn.active      { background:rgba(6,182,212,0.12); border-color:rgba(6,182,212,0.4); color:#06b6d4; }
-      .lp-tag-btn.active-cio  { background:rgba(139,92,246,0.12); border-color:rgba(139,92,246,0.4); color:#a78bfa; }
-      .lp-tag-btn:hover       { background:rgba(6,182,212,0.08); border-color:rgba(6,182,212,0.3); color:#06b6d4; }
 
-      .lp-features-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:18px; }
-      .lp-feature-card {
-        background:rgba(10,15,30,0.65); border:1px solid rgba(255,255,255,0.07);
-        border-radius:14px; padding:26px; position:relative; overflow:hidden;
-        transition:border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+      /* ── BENTO GRID (About) ──────────────────────────── */
+      .lp-bento-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:20px; }
+      .lp-bento-card {
+        background:rgba(8,14,32,0.75); border:1px solid rgba(255,255,255,0.07);
+        border-radius:20px; padding:36px; backdrop-filter:blur(16px);
+        transition:transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+        display:flex; flex-direction:column;
       }
-      .lp-feature-card::before {
-        content:''; position:absolute; inset:0;
-        background:linear-gradient(135deg, rgba(6,182,212,0.04) 0%, transparent 60%);
-        opacity:0; transition:opacity 0.3s;
+      .lp-bento-card:hover { transform:translateY(-4px); border-color:rgba(6,182,212,0.25); box-shadow:0 16px 40px rgba(6,182,212,0.08); }
+      .lp-bento-card:nth-child(even):hover { border-color:rgba(139,92,246,0.25); box-shadow:0 16px 40px rgba(139,92,246,0.08); }
+      .lp-bento-card-icon {
+        width:52px; height:52px; border-radius:14px;
+        display:flex; align-items:center; justify-content:center; margin-bottom:20px;
       }
-      .lp-feature-card:hover { border-color:rgba(6,182,212,0.28); transform:translateY(-3px); box-shadow:0 12px 40px rgba(6,182,212,0.09); }
-      .lp-feature-card:hover::before { opacity:1; }
-      .lp-feature-icon { font-size:1.75rem; margin-bottom:12px; display:block; }
-      .lp-feature-tag {
-        position:absolute; top:14px; right:14px; font-size:0.65rem; font-weight:700;
-        letter-spacing:1px; text-transform:uppercase; padding:3px 8px; border-radius:4px;
+      .lp-bento-icon-create { background:linear-gradient(135deg,rgba(6,182,212,0.15),rgba(6,182,212,0.05)); color:#06b6d4; border:1px solid rgba(6,182,212,0.2); }
+      .lp-bento-icon-target { background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(139,92,246,0.05)); color:#a78bfa; border:1px solid rgba(139,92,246,0.2); }
+      .lp-bento-icon-plan   { background:linear-gradient(135deg,rgba(6,182,212,0.12),rgba(8,145,178,0.05)); color:#22d3ee; border:1px solid rgba(6,182,212,0.18); }
+      .lp-bento-icon-manage { background:linear-gradient(135deg,rgba(100,116,139,0.15),rgba(71,85,105,0.05)); color:#94a3b8; border:1px solid rgba(100,116,139,0.2); }
+      .lp-bento-card h3 { font-size:1.45rem; font-weight:700; letter-spacing:-0.5px; color:#f1f5f9; margin-bottom:8px; }
+      .lp-bento-card-sub { font-size:0.925rem; color:rgba(148,163,184,0.7); margin-bottom:28px; line-height:1.5; }
+      .lp-bento-feature-list { list-style:none; display:flex; flex-direction:column; gap:14px; margin-top:auto; }
+      .lp-bento-feature-item { display:flex; align-items:flex-start; gap:12px; }
+      .lp-bento-feature-dot {
+        flex-shrink:0; width:22px; height:22px; border-radius:50%;
+        background:rgba(6,182,212,0.1); color:#06b6d4;
+        display:flex; align-items:center; justify-content:center; margin-top:2px;
       }
-      .lp-feature-tag-marketer { background:rgba(6,182,212,0.12); color:#06b6d4; border:1px solid rgba(6,182,212,0.22); }
-      .lp-feature-tag-cio      { background:rgba(139,92,246,0.12); color:#a78bfa; border:1px solid rgba(139,92,246,0.22); }
-      .lp-feature-title { font-size:1rem; font-weight:700; color:#f1f5f9; margin-bottom:9px; }
-      .lp-feature-desc  { font-size:0.875rem; color:rgba(148,163,184,0.78); line-height:1.6; }
+      .lp-bento-card:nth-child(even) .lp-bento-feature-dot { background:rgba(139,92,246,0.1); color:#a78bfa; }
+      .lp-bento-feature-text { display:flex; flex-direction:column; }
+      .lp-bento-feature-title { font-weight:600; color:#e2e8f0; font-size:0.925rem; margin-bottom:3px; }
+      .lp-bento-feature-desc  { font-size:0.845rem; color:rgba(148,163,184,0.68); line-height:1.5; }
 
-      /* ── DOCS ────────────────────────────────────────── */
-      .lp-docs-placeholder {
-        text-align:center; padding:60px 20px;
-        border:1px dashed rgba(255,255,255,0.08); border-radius:16px;
-        background:rgba(10,15,30,0.4);
+      /* ── DOCS EYEBROW ─────────────────────────────────── */
+      .lp-docs-eyebrow {
+        display:inline-flex; align-items:center; gap:8px;
+        color:#06b6d4; font-family:ui-monospace,'SFMono-Regular',Consolas,monospace;
+        font-size:0.8rem; font-weight:500; letter-spacing:0.5px; margin-bottom:14px;
+        background:rgba(6,182,212,0.08); padding:5px 14px; border-radius:100px;
+        border:1px solid rgba(6,182,212,0.2);
       }
-      .lp-docs-icon  { font-size:3rem; margin-bottom:18px; opacity:0.55; }
-      .lp-docs-title { font-size:1.35rem; font-weight:700; color:#f1f5f9; margin-bottom:9px; }
-      .lp-docs-sub   { font-size:0.95rem; color:rgba(148,163,184,0.65); }
+      .lp-docs-status-dot {
+        width:7px; height:7px; background:#10b981; border-radius:50%;
+        box-shadow:0 0 8px rgba(16,185,129,0.5); animation:lpStatusPulse 2s infinite;
+      }
+      @keyframes lpStatusPulse { 0%{box-shadow:0 0 0 0 rgba(16,185,129,0.4);} 70%{box-shadow:0 0 0 8px rgba(16,185,129,0);} 100%{box-shadow:0 0 0 0 rgba(16,185,129,0);} }
+
+      /* ── ARCHITECTURE FLOW ───────────────────────────── */
+      .lp-arch-flow {
+        background:rgba(8,14,32,0.75); border:1px solid rgba(255,255,255,0.07);
+        border-radius:20px; padding:36px 36px 40px; backdrop-filter:blur(16px);
+        margin-bottom:20px; overflow-x:auto;
+      }
+      .lp-arch-title {
+        font-size:0.72rem; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+        color:rgba(148,163,184,0.42); margin-bottom:32px;
+        font-family:ui-monospace,'SFMono-Regular',Consolas,monospace;
+      }
+      .lp-arch-container { display:flex; flex-direction:column; align-items:center; min-width:480px; }
+      .lp-arch-row { display:flex; justify-content:center; gap:20px; width:100%; flex-wrap:wrap; }
+      .lp-arch-node {
+        background:rgba(10,16,36,0.9); border:1px solid rgba(255,255,255,0.1);
+        padding:13px 20px; border-radius:12px; font-weight:600; font-size:0.875rem; color:#cbd5e1;
+        display:flex; align-items:center; gap:9px; min-width:195px; justify-content:center;
+      }
+      .lp-arch-node.lp-arch-primary { background:rgba(6,182,212,0.1); border-color:rgba(6,182,212,0.3); color:#67e8f9; box-shadow:0 0 18px rgba(6,182,212,0.07); }
+      .lp-arch-node.lp-arch-ai      { background:rgba(139,92,246,0.1); border-color:rgba(139,92,246,0.3); color:#c4b5fd; }
+      .lp-arch-node.lp-arch-data    { background:rgba(6,182,212,0.06); border-color:rgba(6,182,212,0.18); color:#7dd3fc; }
+      .lp-arch-line-v { width:2px; height:24px; background:rgba(255,255,255,0.08); margin:0 auto; }
+      .lp-arch-split { width:100%; height:24px; position:relative; display:flex; justify-content:center; }
+      .lp-arch-split::before {
+        content:''; position:absolute; top:0; left:50%; transform:translateX(-50%);
+        width:460px; height:24px;
+        border-top:2px solid rgba(255,255,255,0.08);
+        border-left:2px solid rgba(255,255,255,0.08);
+        border-right:2px solid rgba(255,255,255,0.08);
+        border-radius:8px 8px 0 0;
+      }
+
+      /* ── DOCS GRID ───────────────────────────────────── */
+      .lp-docs-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:20px; }
+      .lp-docs-card {
+        background:rgba(8,14,32,0.75); border:1px solid rgba(255,255,255,0.07);
+        border-radius:20px; padding:36px; backdrop-filter:blur(16px);
+        transition:transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+      }
+      .lp-docs-card.lp-span-2 { grid-column:span 2; display:grid; grid-template-columns:1fr 1fr; gap:36px; align-items:start; }
+      .lp-docs-card:hover { transform:translateY(-4px); border-color:rgba(255,255,255,0.11); box-shadow:0 16px 40px rgba(0,0,0,0.2); }
+      .lp-docs-card-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+      .lp-docs-card-icon { width:44px; height:44px; border-radius:11px; display:flex; align-items:center; justify-content:center; }
+      .lp-docs-icon-ai      { background:rgba(139,92,246,0.12); color:#c4b5fd; border:1px solid rgba(139,92,246,0.22); }
+      .lp-docs-icon-security{ background:rgba(239,68,68,0.1); color:#fca5a5; border:1px solid rgba(239,68,68,0.18); }
+      .lp-docs-icon-infra   { background:rgba(16,185,129,0.1); color:#6ee7b7; border:1px solid rgba(16,185,129,0.18); }
+      .lp-docs-icon-metrics { background:rgba(245,158,11,0.1); color:#fcd34d; border:1px solid rgba(245,158,11,0.18); }
+      .lp-docs-icon-api     { background:rgba(100,116,139,0.1); color:#94a3b8; border:1px solid rgba(100,116,139,0.18); }
+      .lp-docs-icon-brain   { background:rgba(236,72,153,0.1); color:#f9a8d4; border:1px solid rgba(236,72,153,0.18); }
+      .lp-docs-card h3 { font-size:1.2rem; font-weight:700; letter-spacing:-0.3px; color:#f1f5f9; }
+      .lp-docs-card-sub { font-size:0.875rem; color:rgba(148,163,184,0.62); margin-bottom:20px; line-height:1.5; }
+      .lp-docs-feature-list { list-style:none; display:flex; flex-direction:column; gap:16px; }
+      .lp-docs-feature-item { display:flex; align-items:flex-start; gap:11px; }
+      .lp-docs-feature-bullet {
+        flex-shrink:0; width:18px; height:18px; border-radius:5px;
+        background:rgba(255,255,255,0.04); display:flex; align-items:center; justify-content:center;
+        color:rgba(148,163,184,0.55); margin-top:3px;
+      }
+      .lp-docs-feature-mono { font-family:ui-monospace,'SFMono-Regular',Consolas,monospace; font-size:0.8rem; font-weight:600; color:#e2e8f0; margin-bottom:4px; }
+      .lp-docs-feature-desc { font-size:0.855rem; color:rgba(148,163,184,0.67); line-height:1.58; }
+      .lp-docs-feature-text { display:flex; flex-direction:column; }
 
       /* ── FOOTER CTA ──────────────────────────────────── */
       .lp-footer-cta { position:relative; z-index:2; padding:80px 48px 56px; text-align:center; border-top:1px solid rgba(255,255,255,0.05); }
@@ -967,9 +962,18 @@ export default function LandingPage() {
         .lp-hero-visual    { height:320px; }
         .lp-halo-1         { width:300px; height:300px; }
         .lp-halo-2         { width:260px; height:260px; }
-        .lp-features-grid  { grid-template-columns:1fr; }
         .lp-login-card     { padding:36px 20px 30px; }
         .lp-gradient-btn   { padding:14px 32px; font-size:0.95rem; }
+        .lp-bento-grid     { grid-template-columns:1fr; }
+        .lp-bento-card     { padding:26px; }
+        .lp-docs-grid      { grid-template-columns:1fr; }
+        .lp-docs-card      { padding:26px; }
+        .lp-docs-card.lp-span-2 { grid-column:span 1; grid-template-columns:1fr; }
+        .lp-arch-flow      { padding:20px; }
+        .lp-arch-container { min-width:280px; }
+        .lp-arch-split::before { width:240px; }
+        .lp-arch-row       { gap:10px; }
+        .lp-arch-node      { min-width:150px; font-size:0.8rem; padding:10px 14px; }
       }
       @media (max-width: 480px) {
         .lp-hero-title     { letter-spacing:-1px; }
@@ -1141,7 +1145,6 @@ export default function LandingPage() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const filteredFeatures = filterTag === 'All' ? FEATURES : FEATURES.filter(f => f.tag === filterTag);
 
   return (
     <div className="lp-root">
@@ -1273,43 +1276,157 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── ABOUT / FEATURES ── */}
+      {/* ── ABOUT ── */}
       <section id="about" className="lp-section">
         <div className="lp-section-inner">
           <div className="lp-section-header">
-            <div className="lp-section-label">Platform Capabilities</div>
-            <h2 className="lp-section-title">Built for Marketers &amp; Engineers</h2>
+            <span className="lp-about-eyebrow">For Marketers</span>
+            <h2 className="lp-section-title">
+              Stop starting from a <span className="lp-title-gradient">blank page.</span>
+            </h2>
             <p className="lp-section-sub">
-              A complete AI marketing stack — from brief to launch — with the
-              enterprise-grade architecture your team can trust.
+              Vantage GenAI turns your historical data, brand voice, and customer reviews into
+              high-converting campaigns across every channel in seconds. No prompt engineering required.
             </p>
           </div>
 
-          <div className="lp-tag-filters">
-            {['All', 'Marketer', 'CIO'].map(tag => (
-              <button
-                key={tag}
-                className={`lp-tag-btn${
-                  filterTag === tag ? (tag === 'CIO' ? ' active-cio' : ' active') : ''
-                }`}
-                onClick={() => setFilterTag(tag)}
-              >
-                {tag === 'All' ? '🔮 All Features' : tag === 'Marketer' ? '🎯 Marketer View' : '⚙️ CIO View'}
-              </button>
-            ))}
-          </div>
+          <div className="lp-bento-grid">
 
-          <div className="lp-features-grid">
-            {filteredFeatures.map(f => (
-              <div key={f.title} className="lp-feature-card">
-                <span className={`lp-feature-tag ${f.tag === 'CIO' ? 'lp-feature-tag-cio' : 'lp-feature-tag-marketer'}`}>
-                  {f.tag}
-                </span>
-                <span className="lp-feature-icon">{f.icon}</span>
-                <div className="lp-feature-title">{f.title}</div>
-                <div className="lp-feature-desc">{f.desc}</div>
+            {/* Create */}
+            <div className="lp-bento-card">
+              <div className="lp-bento-card-icon lp-bento-icon-create">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
               </div>
-            ))}
+              <h3>Create at the speed of thought</h3>
+              <p className="lp-bento-card-sub">Turn brief ideas into fully-fleshed campaigns instantly.</p>
+              <ul className="lp-bento-feature-list">
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Plain English Generation</span>
+                    <span className="lp-bento-feature-desc">Describe your campaign naturally. Get platform-ready copy instantly.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Omnichannel Output</span>
+                    <span className="lp-bento-feature-desc">Google Search, Facebook, Instagram, YouTube, and PMax — all in one click.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Iterative Refinement</span>
+                    <span className="lp-bento-feature-desc">Chat back: "Make it more urgent" or "Add the weekend offer". It remembers context.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Brand Voice Baked In</span>
+                    <span className="lp-bento-feature-desc">Your tone, keywords, and restrictions are hardcoded. The AI never goes off-brand.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            {/* Target */}
+            <div className="lp-bento-card">
+              <div className="lp-bento-card-icon lp-bento-icon-target">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              </div>
+              <h3>Target with precision</h3>
+              <p className="lp-bento-card-sub">Let data, not guesswork, drive your messaging.</p>
+              <ul className="lp-bento-feature-list">
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Review-Powered Messaging</span>
+                    <span className="lp-bento-feature-desc">Automatically pulls your latest 4–5 star Google Reviews and turns customer sentiment into ad copy gold.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Location-Aware</span>
+                    <span className="lp-bento-feature-desc">Real-time Maps integration ensures your ads reference the exact right city or landmark.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Audience Intent Detection</span>
+                    <span className="lp-bento-feature-desc">Captures what your customer actually wants based on historical conversion data and writes to that intent.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            {/* Plan */}
+            <div className="lp-bento-card">
+              <div className="lp-bento-card-icon lp-bento-icon-plan">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </div>
+              <h3>Plan the full funnel</h3>
+              <p className="lp-bento-card-sub">Move from single ads to cohesive, multi-touch campaigns.</p>
+              <ul className="lp-bento-feature-list">
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Marketing Calendar</span>
+                    <span className="lp-bento-feature-desc">Schedule campaigns across channels visually. See your full month at a glance.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">CRM Campaign Builder</span>
+                    <span className="lp-bento-feature-desc">Build sequential outreach for Email, WhatsApp, and App Push in one cohesive flow.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Brief Tracker</span>
+                    <span className="lp-bento-feature-desc">Every campaign brief is saved, searchable, and reusable. No more lost briefs in email threads.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            {/* Manage */}
+            <div className="lp-bento-card">
+              <div className="lp-bento-card-icon lp-bento-icon-manage">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              </div>
+              <h3>Manage everything</h3>
+              <p className="lp-bento-card-sub">Centralize your workflow in one intelligent dashboard.</p>
+              <ul className="lp-bento-feature-list">
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Unified Dashboard</span>
+                    <span className="lp-bento-feature-desc">No switching between ad managers. Handle Google, Meta, and CRM from one screen.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">AI Co-pilot Interface</span>
+                    <span className="lp-bento-feature-desc">Talk to your AI like a colleague. Ask questions, get copy suggestions, and make changes naturally.</span>
+                  </div>
+                </li>
+                <li className="lp-bento-feature-item">
+                  <div className="lp-bento-feature-dot"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-bento-feature-text">
+                    <span className="lp-bento-feature-title">Complete Copy History</span>
+                    <span className="lp-bento-feature-desc">Every generation is saved. Go back, compare variants, and reuse past high-performing campaigns.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
           </div>
         </div>
       </section>
@@ -1318,16 +1435,276 @@ export default function LandingPage() {
       <section id="docs" className="lp-section">
         <div className="lp-section-inner">
           <div className="lp-section-header">
-            <div className="lp-section-label">Documentation</div>
-            <h2 className="lp-section-title">Guides &amp; API Reference</h2>
-          </div>
-          <div className="lp-docs-placeholder">
-            <div className="lp-docs-icon">📚</div>
-            <div className="lp-docs-title">Coming Soon</div>
-            <div className="lp-docs-sub">
-              Comprehensive setup guides, API references, RAG engine docs,
-              and CRM integration playbooks are in progress.
+            <div className="lp-docs-eyebrow">
+              <div className="lp-docs-status-dot" />
+              SYSTEM STATUS: VERSION 2.6
             </div>
+            <h2 className="lp-section-title">
+              Enterprise-grade infrastructure.<br />Zero maintenance.
+            </h2>
+            <p className="lp-section-sub">
+              Explore the architecture, security models, and data pipelines powering Vantage GenAI.
+              Built for scale, optimized for cost, and secured by design.
+            </p>
+          </div>
+
+          {/* Architecture Flow Diagram */}
+          <div className="lp-arch-flow">
+            <div className="lp-arch-title">Data Pipeline &amp; Infrastructure Topology</div>
+            <div className="lp-arch-container">
+              <div className="lp-arch-row">
+                <div className="lp-arch-node lp-arch-primary">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                  React Frontend (Vite SPA)
+                </div>
+              </div>
+              <div className="lp-arch-line-v" />
+              <div className="lp-arch-row">
+                <div className="lp-arch-node" style={{background:'rgba(15,23,42,0.95)',borderColor:'rgba(255,255,255,0.18)',color:'#f1f5f9',boxShadow:'0 4px 20px rgba(0,0,0,0.4)'}}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+                  FastAPI Core (Cloud Run)
+                </div>
+              </div>
+              <div className="lp-arch-line-v" />
+              <div className="lp-arch-split" />
+              <div className="lp-arch-row" style={{gap:'16px'}}>
+                <div className="lp-arch-node lp-arch-ai">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
+                  Claude AI Engine
+                </div>
+                <div className="lp-arch-node lp-arch-data">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  Firestore DB
+                </div>
+                <div className="lp-arch-node lp-arch-data">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                  Places API &amp; Scraper
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Technical Pillars */}
+          <div className="lp-docs-grid">
+
+            {/* AI & Data Architecture — spans 2 */}
+            <div className="lp-docs-card lp-span-2">
+              <div>
+                <div className="lp-docs-card-header">
+                  <div className="lp-docs-card-icon lp-docs-icon-ai">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
+                  </div>
+                  <h3>AI &amp; Data Architecture</h3>
+                </div>
+                <p className="lp-docs-card-sub">The intelligence layer powering localized, brand-safe marketing generation.</p>
+              </div>
+              <ul className="lp-docs-feature-list">
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">RAG (Retrieval-Augmented Generation) Engine</span>
+                    <span className="lp-docs-feature-desc">Combines live context (scraped URLs, reviews, location data) with pre-processed historical ad performance insights stored in Firestore to ground every generation in real data.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Multi-Model Support</span>
+                    <span className="lp-docs-feature-desc">Switch between Claude Sonnet, Haiku, and Opus models via admin settings. Balance speed vs. quality vs. cost per use case.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Historical Data Ingestion Pipeline</span>
+                    <span className="lp-docs-feature-desc">Upload past ad performance CSVs; the system ingests, analyzes, and stores AI-generated insights per brand/property — no manual tagging required.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Brand Guardrails Enforcement</span>
+                    <span className="lp-docs-feature-desc">Positive, negative, and restricted keyword lists are enforced strictly at the prompt-assembly layer — not post-processing.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            {/* Security */}
+            <div className="lp-docs-card">
+              <div className="lp-docs-card-header">
+                <div className="lp-docs-card-icon lp-docs-icon-security">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <h3>Security &amp; Access</h3>
+              </div>
+              <ul className="lp-docs-feature-list">
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Role-Based Access Control</span>
+                    <span className="lp-docs-feature-desc">Admin and user roles with scoped permissions. Admins exclusively manage users, models, and training data.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">JWT Authentication</span>
+                    <span className="lp-docs-feature-desc">Stateless, secure token-based authentication with audit-logged session tracking.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Zero Raw Credentials</span>
+                    <span className="lp-docs-feature-desc">Environment variables are injected at runtime; secrets never touch source code or containers.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            {/* Infrastructure */}
+            <div className="lp-docs-card">
+              <div className="lp-docs-card-header">
+                <div className="lp-docs-card-icon lp-docs-icon-infra">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+                </div>
+                <h3>Infrastructure</h3>
+              </div>
+              <ul className="lp-docs-feature-list">
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Serverless &amp; Scale-to-Zero</span>
+                    <span className="lp-docs-feature-desc">Deployed on Google Cloud Run (asia-south1); scales automatically based on traffic. No idle compute costs.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Multi-stage Container</span>
+                    <span className="lp-docs-feature-desc">Node 20 (frontend) and Python 3.12 (backend) merged in a single optimized Docker image via Google Cloud Build.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Firestore System of Record</span>
+                    <span className="lp-docs-feature-desc">All users, audit logs, brand data, and compact insights are stored in NoSQL Firestore. Zero database maintenance.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            {/* Observability */}
+            <div className="lp-docs-card">
+              <div className="lp-docs-card-header">
+                <div className="lp-docs-card-icon lp-docs-icon-metrics">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                </div>
+                <h3>Observability &amp; Cost</h3>
+              </div>
+              <ul className="lp-docs-feature-list">
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Per-Request Cost Tracking</span>
+                    <span className="lp-docs-feature-desc">Token usage and precise cost in INR are calculated per generation and refinement cycle, fully visible in admin logs.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Usage Stats Per User</span>
+                    <span className="lp-docs-feature-desc">Monitor total generations, tokens consumed, and cost breakdown per team member to identify power users.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Complete Audit Trail</span>
+                    <span className="lp-docs-feature-desc">Every action logs user ID, inputs, token count, cost, and latency. Exportable to CSV for compliance.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            {/* API & Integrations */}
+            <div className="lp-docs-card">
+              <div className="lp-docs-card-header">
+                <div className="lp-docs-card-icon lp-docs-icon-api">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                </div>
+                <h3>API &amp; Integrations</h3>
+              </div>
+              <ul className="lp-docs-feature-list">
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">REST API with OpenAPI Spec</span>
+                    <span className="lp-docs-feature-desc">Full Swagger UI and ReDoc available at /api/docs. Completely headless-ready for integration into existing CI/CD or ERPs.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Google Places Integration</span>
+                    <span className="lp-docs-feature-desc">Real-time property search, ratings, review counts, and automatic 4–5 star review extraction via API.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Web Scraper Engine</span>
+                    <span className="lp-docs-feature-desc">Crawls target URLs 1-level deep automatically to extract property details, USPs, and amenities — eliminating manual copy-paste.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            {/* The AI Brain — spans 2 */}
+            <div className="lp-docs-card lp-span-2">
+              <div>
+                <div className="lp-docs-card-header">
+                  <div className="lp-docs-card-icon lp-docs-icon-brain">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
+                  </div>
+                  <h3>The AI Brain &amp; Continuous Training</h3>
+                </div>
+                <p className="lp-docs-card-sub">A self-optimizing, highly cost-effective intelligence layer that learns from open-ended inputs.</p>
+              </div>
+              <ul className="lp-docs-feature-list">
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Open-Ended Training Pipeline</span>
+                    <span className="lp-docs-feature-desc">The backend accepts unstructured CSVs or open-text instructions. The AI acts as a data scientist, parsing metrics (CTR, Unsubscribes) to extract global best practices without rigid formatting constraints.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Compact Insights Architecture</span>
+                    <span className="lp-docs-feature-desc">By replacing heavy vector databases (like ChromaDB) with a distilled JSON 'Insights Document' in Firestore, the system drastically reduces payload size. This guarantees low-latency, token-efficient API calls for every generation.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Ad-Hoc Model Retraining</span>
+                    <span className="lp-docs-feature-desc">Administrators can pass plain-text instructions (e.g., "Prioritize the new loyalty program this month") to instantly retrain the model's behavior. The system updates the brain, tracking the exact timestamp in the audit log.</span>
+                  </div>
+                </li>
+                <li className="lp-docs-feature-item">
+                  <div className="lp-docs-feature-bullet"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+                  <div className="lp-docs-feature-text">
+                    <span className="lp-docs-feature-mono">Tokenized Cost Optimization</span>
+                    <span className="lp-docs-feature-desc">Every generation is strictly tokenized. Synthesized data (like 150 scraped Google Reviews) is cached with a 30-day TTL. Repeated prompts fetch the cost-free cached insights rather than incurring recurring AI summarization costs.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
           </div>
         </div>
       </section>
