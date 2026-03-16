@@ -1,6 +1,6 @@
 # Vantage GenAI Ad Copy Agent
 
-An enterprise-grade, AI-powered ad copy generation platform built for the hospitality industry. Leverages Google Gemini AI with pre-processed performance insights to produce platform-optimized advertising copy for hotels, resorts, and hospitality brands.
+An enterprise-grade, AI-powered marketing platform for ad copy generation and CRM campaign management. Leverages Google Gemini AI with pre-processed performance insights to produce platform-optimized advertising copy and manage marketing calendars.
 
 **Live Demo:** [vantage-adcopy-agent](https://vantage-adcopy-agent-566761437172.asia-south1.run.app)
 
@@ -37,17 +37,20 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
 ## Features
 
 - **AI-Powered Ad Copy** - Generates optimized ad copy using Google Gemini with context-aware prompts
-- **AI-Powered Insights** - Analyzes historical ad performance on CSV upload via Gemini, stores persistent insights in Firestore for every generation
+- **AI-Powered Insights** - Analyzes historical ad performance on CSV upload via Gemini, stores persistent insights in Firestore
 - **Multi-Platform Output** - Produces copy for Google Search, FB Single Image, FB Carousel, FB Video, Performance Max, and YouTube simultaneously
-- **URL Autocomplete** - Bare domain entry (auto-prepends `https://`), tag-based multi-URL input with history suggestions from previous generations
-- **Google Places Autocomplete** - Search hotels by name, view ratings and review counts, add multiple Google listings with tag-based selection
+- **CRM Marketing Calendar** - Create and manage open-agent-style CRM campaigns with a marketing calendar view
+- **URL Autocomplete** - Bare domain entry (auto-prepends `https://`), tag-based multi-URL input with history suggestions
+- **Google Places Autocomplete** - Search hotels by name, view ratings and review counts, add multiple Google listings
 - **Facebook Ad Types** - Three distinct Facebook formats with platform-specific character limits: Single Image, Carousel, and Video
-- **Carousel Card Flow** - Two modes: AI-suggested card visuals (with index-aligned headlines) or manual card descriptions (2-10 cards)
-- **Post-Generation Refinement** - Feedback loop to refine generated ad copy with specific instructions, accumulated token/time tracking
+- **Carousel Card Flow** - Two modes: AI-suggested card visuals or manual card descriptions (2-10 cards)
+- **Post-Generation Refinement** - Feedback loop to refine generated ad copy with accumulated token/time tracking
 - **Web Scraping** - Crawls hotel reference URLs (1-level deep) to extract property details, amenities, and USPs
-- **Google Reviews Integration** - Pulls 4-5 star reviews from Google Places API, with AI-summarized insights. Supports multiple listings
+- **Google Reviews Integration** - Pulls 4-5 star reviews from Google Places API with AI-summarized insights
 - **Brand Guardrails** - Enforces positive/negative/restricted keywords from uploaded brand USP sheets
-- **Interactive Landing Page** - Animated canvas-based landing with wave effects, particles, and mouse-following spotlight
+- **Animated Landing Page** - Canvas-based landing with wave effects, particles, and mouse-following interactions
+- **Sidebar Layout** - Persistent sidebar navigation with Ad Copy, CRM, and Admin sections
+- **Light/Dark Theme** - System-wide day/night toggle available in navbar (pre-login) and sidebar (post-login)
 - **Admin Dashboard** - User management, CSV uploads, audit logs, usage statistics, model selection, and CSV export
 - **Cost Tracking** - Per-generation and per-refinement token usage and cost in INR with exportable reports
 - **JWT Authentication** - Secure role-based access (admin/user) with session tracking
@@ -79,16 +82,16 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
           |
 +---------v-----------+
 |  Google Places API  |
-|  (Reviews)          |
+|  (Reviews + Maps)   |
 +---------------------+
 ```
 
 **Data Flow:**
-1. User submits hotel details, reference URLs (with autocomplete), Google listings (via Places search), and target platforms
+1. User submits hotel details, reference URLs, Google listings, and target platforms
 2. Backend scrapes reference URLs and fetches Google Reviews from selected listings
 3. Pre-processed ad performance insights are fetched from Firestore (generated on CSV upload)
 4. Brand USPs and guardrails are loaded from Firestore
-5. All context is assembled into a structured prompt for Gemini AI (with carousel alignment rules if applicable)
+5. All context is assembled into a structured prompt for Gemini AI
 6. Generated ad copy is parsed, logged with cost metrics, and returned to the frontend
 7. User can optionally refine results via feedback — tokens and time accumulate across refinement cycles
 
@@ -96,17 +99,17 @@ An enterprise-grade, AI-powered ad copy generation platform built for the hospit
 
 ## Tech Stack
 
-| Layer        | Technology                                        |
-|------------- |---------------------------------------------------|
-| **Frontend** | React 19, Vite 8, React Router 7, Axios, Lucide   |
-| **Backend**  | Python 3.12, FastAPI, Uvicorn, Pydantic            |
-| **AI**       | Google Gemini (google-generativeai SDK)             |
-| **Database** | Google Cloud Firestore (structured data, insights, auth) |
-| **Auth**     | Custom JWT (PyJWT + bcrypt)                         |
-| **Scraping** | httpx, BeautifulSoup4, lxml                        |
-| **Hosting**  | Google Cloud Run (serverless, asia-south1)           |
-| **CI/CD**    | Google Cloud Build                                  |
-| **Container**| Docker (multi-stage: Node 20 + Python 3.12)         |
+| Layer        | Technology                                                  |
+|------------- |-------------------------------------------------------------|
+| **Frontend** | React 19, Vite 8, React Router 7, Axios, Lucide React       |
+| **Backend**  | Python 3.12, FastAPI, Uvicorn, Pydantic                     |
+| **AI**       | Google Gemini (google-generativeai SDK)                     |
+| **Database** | Google Cloud Firestore (structured data, insights, auth)    |
+| **Auth**     | Custom JWT (PyJWT + bcrypt)                                 |
+| **Scraping** | httpx, BeautifulSoup4, lxml                                 |
+| **Hosting**  | Google Cloud Run (serverless, asia-south1)                  |
+| **CI/CD**    | Google Cloud Build                                          |
+| **Container**| Docker (multi-stage: Node 20 + Python 3.12)                 |
 
 ---
 
@@ -145,16 +148,32 @@ Vantage-GenAI-AdCopy-Agent/
 ├── frontend/
 │   ├── src/
 │   │   ├── main.jsx                # React entry point
-│   │   ├── App.jsx                 # Router & protected routes
-│   │   ├── index.css               # Global styles (luxury gold theme)
+│   │   ├── App.jsx                 # Router, protected routes & layout wrappers
+│   │   ├── index.css               # Global styles & theme variables
+│   │   ├── contexts/
+│   │   │   └── ThemeContext.jsx    # Light/dark theme context & toggle
 │   │   ├── pages/
 │   │   │   ├── LandingPage.jsx     # Animated canvas landing page
 │   │   │   ├── Login.jsx           # Authentication form
-│   │   │   ├── Dashboard.jsx       # Ad generation interface
+│   │   │   ├── Dashboard.jsx       # Ad copy generation interface
+│   │   │   ├── CRMWizard.jsx       # CRM marketing calendar & campaign wizard
 │   │   │   └── Admin.jsx           # Admin panel (5 tabs)
 │   │   ├── components/
+│   │   │   ├── AppLayout.jsx       # Sidebar layout with nav, theme toggle, logout
+│   │   │   ├── AppNavbar.jsx       # Top navbar (legacy, retained for compatibility)
+│   │   │   ├── ContextSelector.jsx # Identity type + contextual field selector
 │   │   │   ├── AdResults.jsx       # Ad copy display, carousel cards, refinement UI
-│   │   │   └── GenerationProgress.jsx  # Animated step-by-step progress
+│   │   │   ├── CopilotChat.jsx     # Agent-style copilot chat interface
+│   │   │   ├── CRMResults.jsx      # CRM campaign results display
+│   │   │   ├── BriefTracker.jsx    # Campaign brief tracking component
+│   │   │   ├── BriefSummaryCard.jsx# Brief summary card UI
+│   │   │   ├── CalendarView.jsx    # Calendar view for campaigns
+│   │   │   ├── CampaignCalendarGrid.jsx # Campaign calendar grid display
+│   │   │   ├── CampaignTableView.jsx    # Campaign table view
+│   │   │   ├── ChannelFrequency.jsx     # Channel frequency settings
+│   │   │   ├── EventCalendar.jsx        # Event calendar component
+│   │   │   ├── TrainingWizard.jsx       # Admin training/onboarding wizard
+│   │   │   └── GenerationProgress.jsx   # Animated step-by-step progress
 │   │   ├── hooks/
 │   │   │   └── useAuth.jsx         # Auth context & state management
 │   │   └── services/
@@ -163,7 +182,7 @@ Vantage-GenAI-AdCopy-Agent/
 │   ├── vite.config.js
 │   └── index.html
 ├── Dockerfile                      # Multi-stage Docker build
-├── cloudbuild.yaml                 # GCP Cloud Build pipeline
+├── cloudbuild.yaml                 # GCP Cloud Build pipeline (asia-south1)
 ├── .gitignore
 └── README.md
 ```
@@ -297,7 +316,7 @@ gcloud builds submit --config=cloudbuild.yaml --project=your-project-id
 # Build and push
 gcloud builds submit --tag gcr.io/your-project-id/vantage-adcopy-agent
 
-# Deploy to Cloud Run
+# Deploy to Cloud Run (asia-south1)
 gcloud run deploy vantage-adcopy-agent \
   --image gcr.io/your-project-id/vantage-adcopy-agent \
   --region asia-south1 \
@@ -309,7 +328,7 @@ gcloud run deploy vantage-adcopy-agent \
   --max-instances 5
 ```
 
-**Important:** Environment variables must be set directly on the Cloud Run service (`.env` files are excluded from builds via `.gitignore`):
+**Important:** Environment variables must be set directly on the Cloud Run service:
 
 ```bash
 gcloud run services update vantage-adcopy-agent \
@@ -329,40 +348,37 @@ Interactive API documentation is available at:
 
 ### Endpoints
 
-| Method | Endpoint                          | Auth   | Description                              |
-|--------|-----------------------------------|--------|------------------------------------------|
-| GET    | `/health`                         | None   | Health check                             |
-| POST   | `/api/v1/auth/login`              | None   | Login with email & password              |
-| POST   | `/api/v1/auth/logout`             | JWT    | Logout (audit logging)                   |
-| GET    | `/api/v1/auth/me`                 | JWT    | Get current user info                    |
-| POST   | `/api/v1/generate`                | JWT    | Generate ad copy                         |
-| POST   | `/api/v1/generate/refine`         | JWT    | Refine ad copy with user feedback        |
-| GET    | `/api/v1/generate/url-suggestions`| JWT    | URL autocomplete from generation history |
-| GET    | `/api/v1/places/autocomplete`     | JWT    | Google Places autocomplete search        |
-| POST   | `/api/v1/admin/users`             | Admin  | Create a new user                        |
-| GET    | `/api/v1/admin/users`             | Admin  | List all users                           |
-| PUT    | `/api/v1/admin/users/{id}`        | Admin  | Update a user                            |
-| DELETE | `/api/v1/admin/users/{id}`        | Admin  | Delete a user                            |
-| POST   | `/api/v1/admin/upload/historical-ads` | Admin | Upload historical ads CSV            |
-| POST   | `/api/v1/admin/upload/brand-usp`  | Admin  | Upload brand USP CSV                     |
-| GET    | `/api/v1/admin/audit-logs`        | Admin  | View generation audit logs               |
-| GET    | `/api/v1/admin/usage-stats`       | Admin  | Per-user usage statistics                |
-| GET    | `/api/v1/admin/export/usage`      | Admin  | Export all usage data as CSV             |
-| GET    | `/api/v1/admin/settings`          | Admin  | Get current admin settings               |
-| PUT    | `/api/v1/admin/settings`          | Admin  | Update default AI model                  |
+| Method | Endpoint                              | Auth   | Description                              |
+|--------|---------------------------------------|--------|------------------------------------------|
+| GET    | `/health`                             | None   | Health check                             |
+| POST   | `/api/v1/auth/login`                  | None   | Login with email & password              |
+| POST   | `/api/v1/auth/logout`                 | JWT    | Logout (audit logging)                   |
+| GET    | `/api/v1/auth/me`                     | JWT    | Get current user info                    |
+| POST   | `/api/v1/generate`                    | JWT    | Generate ad copy                         |
+| POST   | `/api/v1/generate/refine`             | JWT    | Refine ad copy with user feedback        |
+| GET    | `/api/v1/generate/url-suggestions`    | JWT    | URL autocomplete from generation history |
+| GET    | `/api/v1/places/autocomplete`         | JWT    | Google Places autocomplete search        |
+| POST   | `/api/v1/admin/users`                 | Admin  | Create a new user                        |
+| GET    | `/api/v1/admin/users`                 | Admin  | List all users                           |
+| PUT    | `/api/v1/admin/users/{id}`            | Admin  | Update a user                            |
+| DELETE | `/api/v1/admin/users/{id}`            | Admin  | Delete a user                            |
+| POST   | `/api/v1/admin/upload/historical-ads` | Admin  | Upload historical ads CSV                |
+| POST   | `/api/v1/admin/upload/brand-usp`      | Admin  | Upload brand USP CSV                     |
+| GET    | `/api/v1/admin/audit-logs`            | Admin  | View generation audit logs               |
+| GET    | `/api/v1/admin/usage-stats`           | Admin  | Per-user usage statistics                |
+| GET    | `/api/v1/admin/export/usage`          | Admin  | Export all usage data as CSV             |
+| GET    | `/api/v1/admin/settings`              | Admin  | Get current admin settings               |
+| PUT    | `/api/v1/admin/settings`              | Admin  | Update default AI model                  |
 
 ---
 
 ## Ad Generation Pipeline
 
-The generation process follows a multi-stage pipeline:
-
 ```
 1. HISTORICAL AD INSIGHTS
    Fetch pre-processed performance insights from Firestore (generated by
    Gemini on CSV upload). Includes top-performing headlines, descriptions,
-   patterns, and actionable findings. Falls back to global insights if
-   no hotel-specific data exists.
+   patterns, and actionable findings.
 
 2. BRAND USP LOOKUP
    Fetch brand-specific USPs, positive keywords, negative keywords, and
@@ -381,8 +397,6 @@ The generation process follows a multi-stage pipeline:
 5. PROMPT ASSEMBLY
    Build a structured system prompt with brand restrictions and a user prompt
    with all gathered context (scraped content, reviews, ad insights, USPs).
-   For FB Carousel: include carousel card context (AI-suggest or manual mode)
-   with strict index alignment between visuals, headlines, and descriptions.
 
 6. AI GENERATION
    Call Google Gemini with platform-specific character limits and format
@@ -390,11 +404,10 @@ The generation process follows a multi-stage pipeline:
 
 7. COST CALCULATION & AUDIT
    Calculate cost in INR based on input/output token usage and model pricing.
-   Log complete audit entry to Firestore with all inputs and metrics.
+   Log complete audit entry to Firestore.
 
 8. REFINEMENT (optional, repeatable)
-   User submits feedback on generated copy. The tool applies changes while
-   maintaining character limits and index alignment. Tokens and time accumulate
+   User submits feedback on generated copy. Tokens and time accumulate
    across refinement cycles. Each refinement is logged in audit trail.
 ```
 
@@ -402,19 +415,14 @@ The generation process follows a multi-stage pipeline:
 
 ## Supported Ad Platforms
 
-| Platform              | Headlines              | Descriptions / Primary Text     | Captions / Primary Text |
-|-----------------------|------------------------|---------------------------------|-------------------------|
-| **Google Search**     | 15 × 30 chars          | 4 × 90 chars                    | -                       |
-| **FB Single Image**   | 5 × 27 chars           | 5 × 50-150 chars (Primary Text) | -                       |
-| **FB Carousel**       | 5 × 45 chars (per card)| 5 × 18 chars (per card)         | 1 × 80 chars (Primary Text) |
-| **FB Video**          | 5 × 27 chars           | 5 × 50-150 chars (Primary Text) | -                       |
-| **Performance Max**   | 15 × 30 chars          | 5 × 90 chars                    | -                       |
-| **YouTube**           | 5 × 40 chars           | 5 × 90 chars                    | 1 × 150 chars           |
-
-### FB Carousel Card Modes
-
-- **Suggest Mode** (default): AI recommends card visuals and generates matching headlines/descriptions aligned by index
-- **Manual Mode**: User provides descriptions for each card (2-10 cards), AI writes headlines/descriptions matching each card's content
+| Platform              | Headlines              | Descriptions / Primary Text         |
+|-----------------------|------------------------|--------------------------------------|
+| **Google Search**     | 15 × 30 chars          | 4 × 90 chars                         |
+| **FB Single Image**   | 5 × 27 chars           | 5 × 50-150 chars (Primary Text)      |
+| **FB Carousel**       | 5 × 45 chars (per card)| 5 × 18 chars + 1 × 80 chars Primary  |
+| **FB Video**          | 5 × 27 chars           | 5 × 50-150 chars (Primary Text)      |
+| **Performance Max**   | 15 × 30 chars          | 5 × 90 chars                         |
+| **YouTube**           | 5 × 40 chars           | 5 × 90 chars + 1 × 150 chars         |
 
 ---
 
@@ -423,16 +431,14 @@ The generation process follows a multi-stage pipeline:
 The admin panel (`/admin`) provides five tabs:
 
 1. **Users** - Create, view, edit, and delete users. Assign admin or user roles.
-2. **CSV Upload** - Upload historical ad performance data (auto-generates AI insights) and brand USP sheets.
-3. **Audit & Usage** - View detailed generation logs with hotel name, tokens used, cost in INR, and generation time. Export all usage data as CSV.
-4. **Usage Stats** - Per-user aggregate statistics: login count, total generations, total tokens, and total cost.
+2. **CSV Upload** - Upload historical ad performance data and brand USP sheets.
+3. **Audit & Usage** - View detailed generation logs with tokens, cost in INR, and generation time.
+4. **Usage Stats** - Per-user aggregate statistics: login count, total generations, total tokens, and cost.
 5. **Settings** - Select the default Gemini AI model for all generations.
 
 ---
 
 ## Cost Tracking
-
-Generation costs are tracked per request and calculated based on model-specific token pricing:
 
 | Model                   | Input (USD/1M tokens) | Output (USD/1M tokens) |
 |-------------------------|-----------------------|------------------------|
@@ -441,7 +447,7 @@ Generation costs are tracked per request and calculated based on model-specific 
 | Gemini 2.5 Pro          | $1.25                 | $10.00                 |
 | Gemini 2.0 Flash Lite   | $0.075                | $0.30                  |
 
-Costs are converted to INR (at 85.0 USD/INR rate) and stored in each audit log entry. Admins can export a comprehensive CSV report via the Audit & Usage tab.
+Costs are converted to INR (at 85.0 USD/INR) and stored per audit log entry.
 
 ---
 
@@ -449,27 +455,23 @@ Costs are converted to INR (at 85.0 USD/INR rate) and stored in each audit log e
 
 ### Historical Ads CSV
 
-Upload past ad performance data. The system dynamically maps columns, stores raw ads in Firestore, and generates AI-powered insights per hotel via Gemini:
-
-| Column (flexible naming)   | Description                                 |
-|----------------------------|---------------------------------------------|
-| Hotel Name                 | Property or brand name                      |
-| Headline(s)                | Ad headline text                            |
-| Description(s)             | Ad description/body text                    |
-| CTR                        | Click-through rate (numeric or percentage)  |
-| CVR                        | Conversion rate (numeric or percentage)     |
+| Column (flexible naming) | Description                                |
+|--------------------------|--------------------------------------------|
+| Hotel Name               | Property or brand name                     |
+| Headline(s)              | Ad headline text                           |
+| Description(s)           | Ad description/body text                   |
+| CTR                      | Click-through rate (numeric or percentage) |
+| CVR                      | Conversion rate (numeric or percentage)    |
 
 ### Brand USP CSV
-
-Upload brand-specific guardrails and keywords:
 
 | Column              | Description                                              |
 |---------------------|----------------------------------------------------------|
 | Hotel Name          | Property or brand name                                   |
 | USPs                | Comma-separated unique selling points                    |
-| Positive Keywords   | Comma-separated keywords to encourage in ad copy         |
-| Negative Keywords   | Comma-separated keywords to avoid                        |
-| Restricted Keywords | Comma-separated keywords that must never appear          |
+| Positive Keywords   | Keywords to encourage in ad copy                         |
+| Negative Keywords   | Keywords to avoid                                        |
+| Restricted Keywords | Keywords that must never appear                          |
 
 ---
 
@@ -477,46 +479,41 @@ Upload brand-specific guardrails and keywords:
 
 ### Environment Variables
 
-| Variable                       | Required | Description                                  |
-|--------------------------------|----------|----------------------------------------------|
-| `GEMINI_API_KEY`               | Yes      | Google Generative AI API key                 |
-| `JWT_SECRET_KEY`               | Yes      | Secret for signing JWT tokens                |
-| `FIREBASE_PROJECT_ID`          | Yes      | GCP Firestore project ID                     |
-| `GCP_PROJECT_ID`               | Yes      | Google Cloud project ID                      |
-| `GOOGLE_PLACES_API_KEY`        | No       | Google Places API key (for reviews feature)  |
-| `FIREBASE_SERVICE_ACCOUNT_PATH`| No       | Path to service account JSON (local dev)     |
-| `REVIEW_CACHE_DAYS`            | No       | Review cache TTL in days (default: `30`)     |
+| Variable                        | Required | Description                                  |
+|---------------------------------|----------|----------------------------------------------|
+| `GEMINI_API_KEY`                | Yes      | Google Generative AI API key                 |
+| `JWT_SECRET_KEY`                | Yes      | Secret for signing JWT tokens                |
+| `FIREBASE_PROJECT_ID`           | Yes      | GCP Firestore project ID                     |
+| `GCP_PROJECT_ID`                | Yes      | Google Cloud project ID                      |
+| `GOOGLE_PLACES_API_KEY`         | No       | Google Places API key (for reviews feature)  |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | No       | Path to service account JSON (local dev)     |
+| `REVIEW_CACHE_DAYS`             | No       | Review cache TTL in days (default: `30`)     |
 
 ### Available AI Models
 
-Configurable via the Admin Settings tab:
-
-- `gemini-2.5-flash` (default) - Fast, cost-effective
-- `gemini-2.5-flash-lite` - Ultra-low cost
-- `gemini-2.5-pro` - Highest quality, higher cost
-- `gemini-2.0-flash-lite` - Legacy low-cost option
+- `gemini-2.5-flash` (default) — Fast, cost-effective
+- `gemini-2.5-flash-lite` — Ultra-low cost
+- `gemini-2.5-pro` — Highest quality, higher cost
+- `gemini-2.0-flash-lite` — Legacy low-cost option
 
 ---
 
 ## Testing
 
 ```bash
-# Run backend tests
 cd backend
 pytest tests/ -v
 ```
 
-Tests cover:
-- Password hashing and verification (bcrypt)
-- JWT token creation and decoding
-- Invalid token handling
+Tests cover: password hashing, JWT token creation/decoding, invalid token handling.
 
 ---
 
 ## Known Limitations
 
-- **Gemini API Quotas** - Free tier has limited requests per minute/day. Enable billing on your GCP project for production workloads to avoid 429 rate-limit errors.
+- **Gemini API Quotas** - Free tier has limited requests per minute/day. Enable billing for production.
 - **CORS** - Currently configured to allow all origins. Restrict to your domain in production.
+- **Custom Domain** - asia-south1 does not support Cloud Run native domain mappings. Use a load balancer or reverse proxy for custom domains.
 
 ---
 
