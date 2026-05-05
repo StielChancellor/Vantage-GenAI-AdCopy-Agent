@@ -17,25 +17,60 @@ import logging
 logger = logging.getLogger("vantage.rag")
 
 
-async def retrieve_ad_insights(hotel_name: str, query_context: str = "") -> dict:
+async def retrieve_ad_insights(
+    hotel_name: str,
+    query_context: str = "",
+    campaign_type: str | None = None,
+    season: str | None = None,
+    flight_date=None,
+) -> dict:
     """Retrieve semantically relevant ad performance insights for a hotel.
 
-    Args:
-        hotel_name: The hotel/brand name (used as brand_id).
-        query_context: Optional text describing the current ad brief (improves relevance).
-
-    Returns:
-        Dict with insight_text, top_headlines, top_descriptions, patterns.
+    v2.1: campaign_type and season filter the vector search so that a Demand
+    Gen video request only retrieves Demand Gen video exemplars from matching
+    seasons. Falls through to Firestore keyword search if Vector Search is
+    unavailable.
     """
     query = query_context or f"Best performing ad headlines and descriptions for {hotel_name}"
 
-    # Try semantic retrieval
-    passages = await _semantic_retrieve(query, brand_id=hotel_name, section_type="ad_performance")
+    # Derive season from flight_date if not given explicitly
+    if not season and flight_date:
+        try:
+            from backend.app.services.ingestion.normalized_record import season_for_month
+            from datetime import date as _date, datetime as _dt
+            if isinstance(flight_date, str):
+                d = _dt.fromisoformat(flight_date).date()
+            elif isinstance(flight_date, _dt):
+                d = flight_date.date()
+            elif isinstance(flight_date, _date):
+                d = flight_date
+            else:
+                d = None
+            if d:
+                season = season_for_month(d.month)
+        except Exception:
+            pass
+
+    passages = await _semantic_retrieve(
+        query,
+        brand_id=hotel_name,
+        section_type=None,                  # search across both google_ads_export and moengage_push
+        campaign_type=campaign_type,
+        season=season,
+        min_impression_bucket="mid",        # exclude low-volume noise
+    )
+
+    # If type-filtered search returned nothing, retry without the season constraint
+    # (a brand might not have winter Demand Gen video exemplars yet).
+    if not passages and (campaign_type or season):
+        passages = await _semantic_retrieve(
+            query, brand_id=hotel_name, campaign_type=campaign_type,
+            min_impression_bucket="mid",
+        )
 
     if passages:
-        return _format_passages_as_insights(passages)
+        return _format_passages_as_insights(passages, campaign_type=campaign_type, season=season)
 
-    # Fallback: Firestore keyword scan (original v1 behavior)
     return _firestore_fallback_insights(hotel_name)
 
 
@@ -63,9 +98,11 @@ async def _semantic_retrieve(
     brand_id: str,
     section_type: str | None = None,
     top_k: int = 10,
+    campaign_type: str | None = None,
+    season: str | None = None,
+    min_impression_bucket: str | None = None,
 ) -> list[dict]:
-    """Core semantic retrieval: embed → ANN search → Firestore fetch → re-rank."""
-    # Step 1: Embed query
+    """Core semantic retrieval: embed → ANN search → Firestore fetch → rank by perf_score."""
     try:
         from backend.app.services.embedding.vertex_embedder import embed_texts
         embedded = await embed_texts([query], use_cache=False)
@@ -73,10 +110,9 @@ async def _semantic_retrieve(
             return []
         query_embedding = embedded[0].embedding
     except Exception as exc:
-        logger.warning("Embedding failed, falling back to keyword search: %s", exc)
+        logger.warning("Embedding failed: %s", exc)
         return []
 
-    # Step 2: ANN search
     try:
         from backend.app.services.embedding.vector_index_manager import query_similar
         neighbors = await query_similar(
@@ -84,6 +120,9 @@ async def _semantic_retrieve(
             top_k=top_k,
             brand_id=brand_id,
             section_type=section_type,
+            campaign_type=campaign_type,
+            season=season,
+            min_impression_bucket=min_impression_bucket,
         )
     except Exception as exc:
         logger.warning("Vector Search query failed: %s", exc)
@@ -92,20 +131,21 @@ async def _semantic_retrieve(
     if not neighbors:
         return []
 
-    # Step 3: Fetch full text from Firestore by content hash IDs
     passages = _fetch_documents_by_ids([n["id"] for n in neighbors])
     if not passages:
         return []
 
-    # Attach distances for re-ranking
     id_to_distance = {n["id"]: n["distance"] for n in neighbors}
     for p in passages:
         p["_distance"] = id_to_distance.get(p.get("id", ""), 999)
 
-    # Step 4: Re-rank top-10 with Gemini (only if we have enough results)
-    if len(passages) >= 5:
-        passages = await _rerank_with_gemini(query, passages[:10])
-
+    # v2.1: prefer performance_score (already on each passage) over Gemini re-rank.
+    # Performance score blends recency × impressions × CTR — much more reliable
+    # than text-similarity for ranking historical exemplars.
+    passages.sort(
+        key=lambda p: (p.get("performance_score", 0), -p.get("_distance", 999)),
+        reverse=True,
+    )
     return passages[:5]
 
 
@@ -190,15 +230,60 @@ def _firestore_fallback_usps(hotel_name: str) -> dict | None:
     return None
 
 
-def _format_passages_as_insights(passages: list[dict]) -> dict:
-    """Format semantic search results into the insight dict shape expected by ad_generator."""
-    texts = [p.get("text", "") for p in passages if p.get("text")]
+def _format_passages_as_insights(
+    passages: list[dict],
+    campaign_type: str | None = None,
+    season: str | None = None,
+) -> dict:
+    """Format semantic search results for ad_generator consumption.
+    v2.1 returns rich, typed exemplars instead of raw concatenated text so
+    ad_generator can build a structured 'TOP PERFORMERS FOR {type}' block."""
+    exemplars = []
+    headlines = []
+    descriptions = []
+    for p in passages:
+        h = (p.get("headline") or "").strip()
+        d = (p.get("description") or "").strip()
+        if not h and not d:
+            continue
+        exemplars.append({
+            "headline": h,
+            "description": d,
+            "campaign_type": p.get("campaign_type", ""),
+            "ad_strength": p.get("ad_strength", ""),
+            "impressions": p.get("impressions", 0),
+            "ctr": p.get("ctr", 0.0),
+            "performance_score": round(p.get("performance_score", 0.0), 4),
+            "month": p.get("month"),
+            "season": p.get("season", ""),
+        })
+        if h:
+            headlines.append(h)
+        if d:
+            descriptions.append(d)
+
+    insight_text_lines = []
+    if exemplars:
+        scope = campaign_type or "all campaign types"
+        if season:
+            scope += f" — {season}"
+        insight_text_lines.append(f"Top historical performers (scope: {scope}):")
+        for ex in exemplars[:5]:
+            insight_text_lines.append(
+                f"- [{ex['campaign_type']}] \"{ex['headline']}\" / \"{ex['description'][:120]}\" "
+                f"— score {ex['performance_score']}, "
+                f"{ex['impressions']} impressions, CTR {ex['ctr']}%"
+            )
+
     return {
         "hotel_name": "_semantic",
-        "insight_text": "\n\n".join(texts[:3]),
-        "top_headlines": [],
-        "top_descriptions": [],
+        "insight_text": "\n".join(insight_text_lines),
+        "top_headlines": headlines[:5],
+        "top_descriptions": descriptions[:5],
         "patterns": [],
+        "exemplars": exemplars,
         "source": "vector_search",
+        "scope_campaign_type": campaign_type,
+        "scope_season": season,
         "total_ads_analyzed": len(passages),
     }

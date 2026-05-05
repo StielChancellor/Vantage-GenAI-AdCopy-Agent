@@ -37,10 +37,7 @@ async def write_ad_performance_rows(
     training_run_id: str,
     model_version: str = "gemini-3.1-pro-preview",
 ) -> None:
-    """Stream historical ad performance rows to BigQuery.
-
-    Silently drops rows that fail validation rather than failing the batch.
-    """
+    """Legacy DataFrame writer. New v2.1 path uses write_normalized_records()."""
     rows = []
     today = date.today().isoformat()
 
@@ -65,6 +62,23 @@ async def write_ad_performance_rows(
     if not rows:
         return
 
+    _insert_rows("ad_performance_events", rows)
+
+
+async def write_normalized_records(
+    records: list,                  # list[NormalizedAdRecord]
+    brand_id: str,
+    training_run_id: str,
+    model_version: str = "gemini-3.1-pro-preview",
+) -> None:
+    """Stream NormalizedAdRecord (v2.1) to ad_performance_events.
+    Writes ALL records — including those below the impression floor — for archival
+    and post-hoc analysis. The performance_score=0 marker excludes them from
+    `get_top_ads_for_scoring` queries.
+    """
+    if not records:
+        return
+    rows = [r.as_bq_row(brand_id, training_run_id, model_version) for r in records]
     _insert_rows("ad_performance_events", rows)
 
 

@@ -19,6 +19,31 @@ from backend.app.models.schemas import (
 
 settings = get_settings()
 
+
+# v2.1: Map the user-facing platform key to the canonical campaign_type used in
+# Vector Search restricts and BigQuery. Missing platforms fall through to None
+# (no campaign_type filter — retrieval still scoped by brand_id and season).
+PLATFORM_TO_CAMPAIGN_TYPE: dict[str, str] = {
+    "google_search": "search_responsive",
+    "pmax": "pmax",
+    "fb_single_image": "demandgen_image",     # Same creative format as Google Demand Gen image
+    "fb_carousel": "demandgen_carousel",
+    "fb_video": "demandgen_video",
+    "youtube": "demandgen_video",
+}
+
+
+def _primary_campaign_type(platforms: list[str]) -> str | None:
+    """Pick the campaign_type to filter retrieval against. Uses the first
+    platform in the request — that's the dominant target the user is briefing.
+    """
+    for p in platforms or []:
+        ct = PLATFORM_TO_CAMPAIGN_TYPE.get(p)
+        if ct:
+            return ct
+    return None
+
+
 # Platform character limits
 PLATFORM_SPECS = {
     "google_search": {
@@ -87,8 +112,14 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     model_name = _get_admin_model()
 
     # 1. Gather context
-    # Semantic RAG — pre-processed ad performance insights
-    ad_insights = await retrieve_ad_insights(request.hotel_name)
+    # v2.1: type-aware retrieval — pulls exemplars matching the requested
+    # platform (mapped to campaign_type) and the flight date's season.
+    primary_ct = _primary_campaign_type(getattr(request, "platforms", []))
+    ad_insights = await retrieve_ad_insights(
+        request.hotel_name,
+        campaign_type=primary_ct,
+        flight_date=getattr(request, "flight_date", None),
+    )
 
     # Brand USPs & guardrails (semantic RAG)
     brand_data = await get_brand_usps(request.hotel_name)
@@ -395,26 +426,52 @@ should be about arrival/welcome, NOT about spa or dining.
 
 Generate exactly 5 card suggestions, 5 matching headlines, and 5 matching descriptions — all aligned by index."""
 
-    # Historical ad performance insights
+    # v2.1: Historical exemplars — typed, scored, season-filtered.
     historical_context = ""
-    if ad_insights and ad_insights.get("insight_text"):
-        historical_context = f"\n\n## HISTORICAL AD PERFORMANCE INSIGHTS ({ad_insights.get('total_ads_analyzed', 0)} ads analyzed):\n"
-        historical_context += ad_insights["insight_text"]
+    exemplars = (ad_insights or {}).get("exemplars") or []
+    scope_ct = (ad_insights or {}).get("scope_campaign_type") or primary_ct or "all types"
+    scope_season = (ad_insights or {}).get("scope_season") or "any season"
+
+    if exemplars:
+        historical_context = (
+            f"\n\n## TOP HISTORICAL PERFORMERS — scope: {scope_ct} / {scope_season}\n"
+            f"(Ranked by composite score = recency × impression_confidence × CTR. "
+            f"Low-volume rows excluded.)\n"
+        )
+        for ex in exemplars[:5]:
+            ct = ex.get("campaign_type", "")
+            h = ex.get("headline", "")
+            d = ex.get("description", "")
+            impr = ex.get("impressions", 0)
+            ctr = ex.get("ctr", 0.0)
+            ps = ex.get("performance_score", 0.0)
+            strength = ex.get("ad_strength") or ""
+            strength_str = f", ad strength: {strength}" if strength else ""
+            historical_context += (
+                f"- [{ct}] \"{h}\"\n"
+                f"  desc: \"{d[:140]}\"\n"
+                f"  → {impr:,} impressions, {ctr}% CTR, score {ps}{strength_str}\n"
+            )
+        historical_context += (
+            "\nUse these as the BASE template for tone, length, structure, and CTA style. "
+            "Do not copy verbatim — adapt to the new offer and brief.\n"
+        )
 
         if ad_insights.get("top_headlines"):
-            historical_context += "\n\n### Top-Performing Headlines (use as style reference):\n"
+            historical_context += "\n### Anchor headlines (style reference):\n"
             for h in ad_insights["top_headlines"][:5]:
                 historical_context += f"- {h}\n"
-
         if ad_insights.get("top_descriptions"):
-            historical_context += "\n### Top-Performing Descriptions:\n"
+            historical_context += "\n### Anchor descriptions:\n"
             for d in ad_insights["top_descriptions"][:5]:
                 historical_context += f"- {d}\n"
-
-        if ad_insights.get("patterns"):
-            historical_context += "\n### Key Patterns:\n"
-            for p in ad_insights["patterns"][:5]:
-                historical_context += f"- {p}\n"
+    elif ad_insights and ad_insights.get("insight_text"):
+        # Legacy / fallback path — keyword Firestore returned something.
+        historical_context = (
+            f"\n\n## HISTORICAL AD PERFORMANCE INSIGHTS "
+            f"({ad_insights.get('total_ads_analyzed', 0)} ads analyzed):\n"
+            + ad_insights["insight_text"]
+        )
 
     # Training directive context (admin-approved AI insights)
     training_context = ""

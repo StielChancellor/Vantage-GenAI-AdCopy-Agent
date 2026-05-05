@@ -114,19 +114,93 @@ async def embed_dataframe_chunk(
     brand_id: str = "",
     training_run_id: str = "",
 ) -> list[EmbeddedDocument]:
-    """Convenience wrapper that adds brand context to metadata."""
+    """Legacy wrapper — embeds raw text with minimal metadata.
+    Use embed_records() for the v2.1 NormalizedAdRecord path.
+    """
     metadata = [{"brand_id": brand_id, "training_run_id": training_run_id} for _ in texts]
     docs = await embed_texts(texts, metadata_list=metadata)
-
-    # Upsert to Vector Search index
     if docs:
         try:
             from backend.app.services.embedding.vector_index_manager import upsert_vectors
             await upsert_vectors(docs)
         except Exception as exc:
             logger.warning("Vector Search upsert failed (non-fatal): %s", exc)
-
     return docs
+
+
+async def embed_records(
+    records: list,  # list[NormalizedAdRecord]
+    brand_id: str,
+    training_run_id: str,
+    section_type: str,
+) -> list[EmbeddedDocument]:
+    """Embed NormalizedAdRecord list with full metadata for retrieval filtering.
+
+    Records with performance_score == 0 (below impression floor) are SKIPPED —
+    we keep them in BigQuery for archival but don't pollute the vector index
+    with low-confidence noise.
+
+    The text actually embedded is `[campaign_type] headline — description`
+    so the embedding space naturally separates campaign sub-types.
+    """
+    if not records:
+        return []
+
+    eligible = [r for r in records if r.performance_score > 0]
+    if not eligible:
+        logger.info(
+            "embed_records: 0/%d records eligible (all below impression floor)",
+            len(records),
+        )
+        return []
+
+    texts = [r.as_embedding_text() for r in eligible]
+    metadata = [r.as_metadata(brand_id, training_run_id, section_type) for r in eligible]
+
+    # Persist text + metadata in Firestore so RAG can fetch full context by ID.
+    docs = await embed_texts(texts, metadata_list=metadata, use_cache=True)
+    _persist_record_text(docs, eligible)
+
+    # Push to Vector Search with rich restricts
+    try:
+        from backend.app.services.embedding.vector_index_manager import upsert_vectors
+        await upsert_vectors(docs)
+    except Exception as exc:
+        logger.warning("Vector Search upsert failed (non-fatal): %s", exc)
+
+    logger.info(
+        "embed_records: embedded %d/%d records for brand=%s section=%s",
+        len(docs), len(records), brand_id, section_type,
+    )
+    return docs
+
+
+def _persist_record_text(docs: list[EmbeddedDocument], records: list) -> None:
+    """Save each embedded record's text + metadata to Firestore embedding_cache
+    so rag_engine._fetch_documents_by_ids can return rich context (not just embeddings)."""
+    if not docs:
+        return
+    try:
+        db = _get_firestore()
+        for doc, rec in zip(docs, records):
+            db.collection("embedding_cache").document(doc.id).set({
+                "text": doc.text,
+                "headline": rec.headline,
+                "description": rec.description,
+                "campaign_type": rec.campaign_type,
+                "ad_strength": rec.ad_strength,
+                "impressions": rec.impressions,
+                "ctr": rec.ctr,
+                "performance_score": rec.performance_score,
+                "month": rec.month,
+                "season": rec.season,
+                "hour_of_day": rec.hour_of_day,
+                "day_of_week": rec.day_of_week,
+                "brand_id": doc.metadata.get("brand_id", ""),
+                "section_type": doc.metadata.get("section_type", ""),
+            }, merge=True)
+    except Exception as exc:
+        logger.debug("Firestore record-text persist failed: %s", exc)
 
 
 def _hash_text(text: str) -> str:

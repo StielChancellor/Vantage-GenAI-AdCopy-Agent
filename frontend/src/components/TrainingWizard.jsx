@@ -12,7 +12,9 @@ import {
 } from 'lucide-react';
 
 const SECTION_TYPES = [
-  { value: 'ad_performance', label: 'Ad Performance', icon: '📊' },
+  { value: 'google_ads_export', label: 'Google Ads Export (Editor CSV)', icon: '🔍' },
+  { value: 'moengage_push', label: 'MoEngage Push Export', icon: '🔔' },
+  { value: 'ad_performance', label: 'Ad Performance (generic)', icon: '📊' },
   { value: 'brand_usp', label: 'Brand & USP', icon: '🏨' },
   { value: 'crm_performance', label: 'CRM Performance', icon: '📱' },
 ];
