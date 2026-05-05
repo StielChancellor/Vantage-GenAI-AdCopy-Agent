@@ -3,14 +3,15 @@ import json
 import time
 from datetime import datetime, timezone
 
-import google.generativeai as genai
-
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.config import get_settings
 from backend.app.core.database import get_firestore
 from backend.app.services.rag_engine import retrieve_ad_insights, get_brand_usps
 from backend.app.services.training_engine import get_training_directives
 from backend.app.services.scraper import scrape_hotel_page
 from backend.app.services.reviews import fetch_google_reviews
+from backend.app.services.seasonal.season_context import build_seasonal_prompt_context
+from backend.app.services.safety.content_filter import check_response
 from backend.app.models.schemas import (
     AdGenerationRequest, AdGenerationResponse, AdCopyOutput,
     AdRefinementRequest,
@@ -68,19 +69,29 @@ def _get_admin_model() -> str:
 
 
 async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse:
-    """Full ad copy generation pipeline."""
+    """Full ad copy generation pipeline with caching, seasonal context, and safety filtering."""
     start_time = time.time()
-    genai.configure(api_key=settings.GEMINI_API_KEY)
 
-    # Get admin-configured model
+    # Check cache first
+    from backend.app.core.cache import get_cache, set_cache, cache_key, TTL_AD_GEN
+    import hashlib
+    brief_hash = hashlib.md5(
+        f"{request.hotel_name}|{request.offer_name}|{request.inclusions}|{','.join(sorted(request.platforms))}".encode()
+    ).hexdigest()[:16]
+    ck = cache_key("ad_gen", brief_hash)
+    cached_result = await get_cache(ck)
+    if cached_result:
+        return AdGenerationResponse(**cached_result)
+
+    # Get admin-configured model (resolved via vertex_client)
     model_name = _get_admin_model()
 
     # 1. Gather context
-    # Pre-processed ad performance insights from Firestore
-    ad_insights = retrieve_ad_insights(request.hotel_name)
+    # Semantic RAG — pre-processed ad performance insights
+    ad_insights = await retrieve_ad_insights(request.hotel_name)
 
-    # Brand USPs & guardrails
-    brand_data = get_brand_usps(request.hotel_name)
+    # Brand USPs & guardrails (semantic RAG)
+    brand_data = await get_brand_usps(request.hotel_name)
 
     # Training directives (approved AI-generated insights from admin — global)
     training_directives = get_training_directives()
@@ -128,7 +139,10 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     # 2. Build the system prompt with guardrails
     system_prompt = _build_system_prompt(brand_data)
 
-    # 3. Build the user prompt with all context
+    # 3. Build the user prompt with all context (including seasonal)
+    seasonal_context = build_seasonal_prompt_context(
+        getattr(request, "flight_date", None)
+    )
     user_prompt = _build_user_prompt(
         request=request,
         ad_insights=ad_insights,
@@ -136,15 +150,21 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         review_data=review_data,
         brand_data=brand_data,
         training_directives=training_directives,
+        seasonal_context=seasonal_context,
     )
 
-    # 4. Call Gemini
-    model = genai.GenerativeModel(
-        model_name,
-        system_instruction=system_prompt,
-    )
-
+    # 4. Call Gemini via Vertex AI
+    model = get_generative_model(model_name, system_instruction=system_prompt)
     response = model.generate_content(user_prompt)
+
+    # 4b. Safety filter
+    filter_result = check_response(
+        response,
+        brand_id=request.hotel_name,
+        request_type="ad_copy",
+    )
+    if not filter_result.passed:
+        raise ValueError(f"Generated content blocked by safety filter: {filter_result.harm_category}")
 
     # 5. Parse response and calculate tokens
     input_tokens = 0
@@ -159,7 +179,7 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
 
     elapsed = round(time.time() - start_time, 2)
 
-    return AdGenerationResponse(
+    ad_response = AdGenerationResponse(
         hotel_name=request.hotel_name,
         variants=variants,
         tokens_used=tokens_used,
@@ -170,11 +190,18 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
+    # Cache result for repeat briefs
+    try:
+        await set_cache(ck, ad_response.model_dump(), ttl=TTL_AD_GEN)
+    except Exception:
+        pass
+
+    return ad_response
+
 
 async def refine_ad_copy(request: AdRefinementRequest) -> dict:
     """Refine ad copy based on user feedback."""
     start_time = time.time()
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     # Build the previous output as context
@@ -249,7 +276,7 @@ For fb_carousel: ensure card_suggestions[i] always matches headlines[i] and desc
 ]
 ```"""
 
-    model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
+    model = get_generative_model(model_name, system_instruction=system_prompt)
     response = model.generate_content(user_prompt)
 
     input_tokens = 0
@@ -307,6 +334,7 @@ def _build_user_prompt(
     review_data: dict,
     brand_data: dict | None,
     training_directives: list[dict] | None = None,
+    seasonal_context: str = "",
 ) -> str:
     """Build the user prompt with all gathered context."""
 
@@ -443,6 +471,7 @@ Generate exactly 5 card suggestions, 5 matching headlines, and 5 matching descri
 {usp_context}
 {review_context}
 {website_context}
+{seasonal_context}
 
 ## OUTPUT FORMAT:
 Return ONLY a JSON array where each element represents a platform:

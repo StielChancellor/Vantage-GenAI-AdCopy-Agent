@@ -7,24 +7,36 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.app.core.config import get_settings
+from backend.app.core.observability import setup_observability
+from backend.app.core.vertex_client import _ensure_init as init_vertex_ai
+from backend.app.middleware.request_logger import RequestLoggingMiddleware
 from backend.app.routers import auth, admin, generate, health, places, training, events, crm, copilot
 
 settings = get_settings()
 
+# Boot observability (Cloud Logging + Cloud Trace) before anything else
+setup_observability()
+
+# Pre-warm Vertex AI SDK connection
+init_vertex_ai()
+
 app = FastAPI(
     title=settings.APP_NAME,
-    version="1.0.0",
+    version="2.0.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Tighten in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Structured request logging with trace IDs
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX, tags=["Auth"])
@@ -43,7 +55,6 @@ if FRONTEND_DIR.exists():
 
     @app.get("/{full_path:path}")
     async def serve_spa(request: Request, full_path: str):
-        """Serve the React SPA for all non-API routes."""
         file_path = FRONTEND_DIR / full_path
         if file_path.is_file():
             return FileResponse(str(file_path))

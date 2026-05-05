@@ -9,9 +9,10 @@ import json
 import time
 from datetime import datetime, timezone, timedelta
 
-import google.generativeai as genai
 
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.config import get_settings
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.database import get_firestore
 from backend.app.services.profile_insights import get_or_create_profile
 from backend.app.services.training_engine import get_training_directives
@@ -72,7 +73,6 @@ def _get_admin_model() -> str:
 async def generate_crm_content(request: CRMGenerateRequest) -> CRMGenerateResponse:
     """Generate CRM campaign content for selected channels with calendar."""
     start_time = time.time()
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     # 1. Gather context
@@ -94,7 +94,7 @@ async def generate_crm_content(request: CRMGenerateRequest) -> CRMGenerateRespon
     user_prompt = _build_crm_user_prompt(request, profile, directives, brand_data)
 
     # 3. Call Gemini
-    model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
+    model = get_generative_model(model_name, system_instruction=system_prompt)
     response = model.generate_content(user_prompt)
 
     # 4. Parse response
@@ -132,7 +132,6 @@ async def generate_crm_content(request: CRMGenerateRequest) -> CRMGenerateRespon
 async def refine_crm_content(request: CRMRefineRequest) -> CRMGenerateResponse:
     """Refine CRM content based on user feedback."""
     start_time = time.time()
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     previous_json = json.dumps(
@@ -194,7 +193,7 @@ Apply the feedback. Return the FULL updated JSON array (all channels, all messag
 ]
 ```"""
 
-    model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
+    model = get_generative_model(model_name, system_instruction=system_prompt)
     response = model.generate_content(user_prompt)
 
     input_tokens = 0

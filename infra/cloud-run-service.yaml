@@ -1,0 +1,56 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: vantage-adcopy-agent
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        # Keep 1 warm instance to eliminate cold start latency
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        # CPU always allocated — needed for background async tasks
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: vantage-cloudrun-sa@supple-moon-495404-b0.iam.gserviceaccount.com
+      containers:
+      - image: us-central1-docker.pkg.dev/supple-moon-495404-b0/vantage/backend:latest
+        resources:
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+        env:
+        - name: GCP_PROJECT_ID
+          value: supple-moon-495404-b0
+        - name: GCP_PROJECT_NUMBER
+          value: "717874273203"
+        - name: GCP_REGION
+          value: us-central1
+        - name: VERTEX_AI_LOCATION
+          value: us-central1
+        - name: GEMINI_MODEL
+          value: gemini-3.1-pro-preview
+        - name: BQ_DATASET
+          value: vantage
+        - name: CLOUD_TASKS_QUEUE
+          value: vantage-ingestion
+        - name: CLOUD_TASKS_LOCATION
+          value: us-central1
+        - name: GCS_UPLOADS_BUCKET
+          value: vantage-uploads-supple-moon-495404-b0
+        - name: GCS_FAILED_BUCKET
+          value: vantage-failed-ingestion-supple-moon-495404-b0
+        - name: ENVIRONMENT
+          value: production
+        - name: DEBUG
+          value: "false"
+        ports:
+        - containerPort: 8080
+  traffic:
+  - percent: 100
+    latestRevision: true

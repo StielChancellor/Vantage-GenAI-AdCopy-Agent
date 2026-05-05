@@ -6,9 +6,10 @@ across Cloud Run restarts. Cache TTL is configurable via REVIEW_CACHE_DAYS.
 import json
 from datetime import datetime, timezone, timedelta
 
-import google.generativeai as genai
 
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.config import get_settings
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.database import get_firestore
 from backend.app.services.scraper import scrape_hotel_page
 from backend.app.services.reviews import fetch_google_reviews
@@ -124,8 +125,6 @@ async def _build_profile(
             "key_usps": [],
             "amenities": [],
         }
-
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     context = f"Hotel: {hotel_name}\n"
@@ -150,7 +149,7 @@ async def _build_profile(
 }}"""
 
     try:
-        model = genai.GenerativeModel(
+        model = get_generative_model(
             model_name,
             system_instruction="Extract and structure hotel data. Output ONLY valid JSON.",
         )

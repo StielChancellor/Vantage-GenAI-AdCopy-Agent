@@ -9,9 +9,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import pandas as pd
-import google.generativeai as genai
 
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.config import get_settings
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.database import get_firestore
 from backend.app.models.schemas import CSVUploadResponse
 
@@ -63,7 +64,6 @@ def _generate_insights(hotel_name: str, ads: list[dict]) -> dict:
     Returns:
         Insight dict ready for Firestore storage.
     """
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     # Build the ads data for analysis
@@ -96,7 +96,7 @@ and identify actionable patterns. Focus on what drives high CTR and CVR. Be spec
 Output ONLY valid JSON matching the requested format."""
 
     try:
-        model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
+        model = get_generative_model(model_name, system_instruction=system_prompt)
         response = model.generate_content(prompt)
 
         # Parse response

@@ -7,9 +7,10 @@ import json
 from datetime import datetime
 
 import httpx
-import google.generativeai as genai
 
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.config import get_settings
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.database import get_firestore
 from backend.app.models.schemas import EventResult
 
@@ -106,7 +107,6 @@ async def _parse_search_results(
     date_range_end: str,
 ) -> list[EventResult]:
     """Use Gemini to extract structured events from search snippets."""
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     results_text = "\n".join(
@@ -141,7 +141,7 @@ Return ONLY a JSON array of events:
 Sort by relevance_score descending. Max 15 events."""
 
     try:
-        model = genai.GenerativeModel(
+        model = get_generative_model(
             model_name,
             system_instruction="Extract structured event data from search results. Return ONLY valid JSON array.",
         )
@@ -177,7 +177,6 @@ async def _fallback_gemini_events(
     categories: list[str],
 ) -> list[EventResult]:
     """Fallback: use Gemini's knowledge to suggest relevant events when Custom Search is unavailable."""
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     date_context = ""
@@ -210,7 +209,7 @@ Return ONLY a JSON array:
 Max 15 events, sorted by relevance_score descending."""
 
     try:
-        model = genai.GenerativeModel(
+        model = get_generative_model(
             model_name,
             system_instruction="You are a travel industry event expert. Return ONLY valid JSON array.",
         )

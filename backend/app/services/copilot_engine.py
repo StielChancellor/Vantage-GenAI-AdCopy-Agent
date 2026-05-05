@@ -3,9 +3,10 @@ import json
 import time
 from datetime import datetime, timezone
 
-import google.generativeai as genai
 
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.config import get_settings
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.database import get_firestore
 from backend.app.models.schemas import CopilotChatRequest, CopilotChatResponse
 
@@ -207,7 +208,6 @@ def _build_conversation_prompt(
 async def copilot_chat(request: CopilotChatRequest) -> CopilotChatResponse:
     """Process a copilot chat turn — send conversation to Gemini, get dual output."""
     start_time = time.time()
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     system_prompt = _build_copilot_system_prompt(request.mode)
@@ -216,7 +216,7 @@ async def copilot_chat(request: CopilotChatRequest) -> CopilotChatResponse:
     recent_messages = request.messages[-20:] if len(request.messages) > 20 else request.messages
     user_prompt = _build_conversation_prompt(recent_messages, request.current_brief)
 
-    model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
+    model = get_generative_model(model_name, system_instruction=system_prompt)
     response = model.generate_content(user_prompt)
 
     # Extract tokens

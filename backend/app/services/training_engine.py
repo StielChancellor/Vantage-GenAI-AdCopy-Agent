@@ -12,21 +12,13 @@ import uuid
 from datetime import datetime, timezone
 
 import pandas as pd
-import google.generativeai as genai
 
+from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.config import get_settings
 from backend.app.core.database import get_firestore
 from backend.app.models.schemas import TrainingUploadResponse
 
 settings = get_settings()
-
-# Approximate pricing per million tokens (USD→INR ≈ 84)
-MODEL_PRICING = {
-    "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
-    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
-    "gemini-1.5-pro": {"input": 3.50, "output": 10.50},
-}
-USD_TO_INR = 84
 
 
 def _get_admin_model() -> str:
@@ -34,24 +26,10 @@ def _get_admin_model() -> str:
         db = get_firestore()
         doc = db.collection("admin_settings").document("config").get()
         if doc.exists:
-            return doc.to_dict().get("default_model", "gemini-2.5-flash")
+            return doc.to_dict().get("default_model", "gemini-3.1-pro-preview")
     except Exception:
         pass
-    return "gemini-2.5-flash"
-
-
-def _calculate_cost(model_name: str, input_tokens: int, output_tokens: int) -> float:
-    pricing = MODEL_PRICING.get(model_name, MODEL_PRICING["gemini-2.5-flash"])
-    cost_usd = (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing["output"]
-    return round(cost_usd * USD_TO_INR, 4)
-
-
-def _extract_tokens(response) -> tuple[int, int]:
-    try:
-        meta = response.usage_metadata
-        return meta.prompt_token_count or 0, meta.candidates_token_count or 0
-    except Exception:
-        return 0, 0
+    return "gemini-3.1-pro-preview"
 
 
 def _parse_json(text: str) -> dict:
@@ -72,7 +50,6 @@ def start_training_session(
 ) -> TrainingUploadResponse:
     """Start a training session with flexible input modes."""
     db = get_firestore()
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
     session_id = str(uuid.uuid4())
     start_time = time.time()
@@ -102,12 +79,12 @@ def start_training_session(
     prompt = _build_training_prompt(section_type, data_section, kpi_context, hero_context, text_context)
 
     try:
-        model = genai.GenerativeModel(
+        model = get_generative_model(
             model_name,
             system_instruction="You are an expert at analyzing marketing data. Return ONLY valid JSON.",
         )
         response = model.generate_content(prompt)
-        input_tokens, output_tokens = _extract_tokens(response)
+        input_tokens, output_tokens = extract_token_counts(response)
         elapsed = round(time.time() - start_time, 2)
 
         result = _parse_json(response.text)
@@ -130,7 +107,7 @@ def start_training_session(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "time_seconds": elapsed,
-            "cost_inr": _calculate_cost(model_name, input_tokens, output_tokens),
+            "cost_inr": calculate_cost_inr(model_name, input_tokens, output_tokens),
             "model_used": model_name,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "completed_at": None,
@@ -265,9 +242,21 @@ def answer_training_questions(
     if approve:
         directive = session.get("directive_preview", {})
         section_type = session.get("section_type", session.get("csv_type", "ad_performance"))
+        brand_id = session.get("brand_id", "_global")
+        run_id = session.get("session_id", session_id)
 
+        # --- v2: Versioned directive storage ---
+        # Store version under directives/{brand_id}/versions/{run_id}
+        version_ref = (
+            db.collection("directives")
+            .document(brand_id)
+            .collection("versions")
+            .document(run_id)
+        )
         directive_doc = {
+            "run_id": run_id,
             "directive_type": section_type,
+            "brand_id": brand_id,
             "content": directive,
             "status": "approved",
             "questions": session.get("questions", []),
@@ -275,9 +264,17 @@ def answer_training_questions(
             "created_at": session.get("created_at", ""),
             "approved_at": datetime.now(timezone.utc).isoformat(),
         }
+        version_ref.set(directive_doc)
+
+        # Update "active" pointer for this brand
+        db.collection("directives").document(brand_id).set(
+            {"active_run_id": run_id, "section_type": section_type, "updated_at": datetime.now(timezone.utc).isoformat()},
+            merge=True,
+        )
 
         effective_save_mode = save_mode or "replace"
 
+        # Also maintain legacy training_directives collection for backward compat
         if effective_save_mode == "replace":
             existing = list(
                 db.collection("training_directives")
@@ -311,7 +308,6 @@ def answer_training_questions(
         )
 
     # Refine directive with answers
-    genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = _get_admin_model()
 
     answers_text = "\n".join(
@@ -334,12 +330,12 @@ Return ONLY valid JSON:
 }}"""
 
     try:
-        model = genai.GenerativeModel(
+        model = get_generative_model(
             model_name,
             system_instruction="Refine training directives based on admin feedback. Return ONLY valid JSON.",
         )
         response = model.generate_content(prompt)
-        new_in, new_out = _extract_tokens(response)
+        new_in, new_out = extract_token_counts(response)
         elapsed = round(time.time() - start_time, 2)
 
         result = _parse_json(response.text)
@@ -359,7 +355,7 @@ Return ONLY valid JSON:
             "input_tokens": total_in,
             "output_tokens": total_out,
             "time_seconds": total_time,
-            "cost_inr": _calculate_cost(model_name, total_in, total_out),
+            "cost_inr": calculate_cost_inr(model_name, total_in, total_out),
         })
 
         return TrainingUploadResponse(
@@ -438,6 +434,47 @@ def _update_ad_insights(directive: dict) -> None:
     for edoc in existing:
         edoc.reference.delete()
     db.collection("ad_insights").add(insight_doc)
+
+
+def rollback_directive(brand_id: str, target_run_id: str) -> dict:
+    """Roll back a brand's active directive to a previous run_id.
+
+    Returns: {"success": bool, "active_run_id": str, "error": str}
+    """
+    db = get_firestore()
+    version_ref = (
+        db.collection("directives")
+        .document(brand_id)
+        .collection("versions")
+        .document(target_run_id)
+    )
+    version_doc = version_ref.get()
+    if not version_doc.exists:
+        return {"success": False, "error": f"Version '{target_run_id}' not found for brand '{brand_id}'."}
+
+    db.collection("directives").document(brand_id).set(
+        {
+            "active_run_id": target_run_id,
+            "rolled_back_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        merge=True,
+    )
+    return {"success": True, "active_run_id": target_run_id}
+
+
+def list_directive_versions(brand_id: str) -> list[dict]:
+    """List all directive versions for a brand, newest first."""
+    db = get_firestore()
+    docs = list(
+        db.collection("directives")
+        .document(brand_id)
+        .collection("versions")
+        .order_by("approved_at", direction="DESCENDING")
+        .limit(20)
+        .stream()
+    )
+    return [d.to_dict() for d in docs]
 
 
 def _summarize_csv(df: pd.DataFrame, section_type: str) -> str:
