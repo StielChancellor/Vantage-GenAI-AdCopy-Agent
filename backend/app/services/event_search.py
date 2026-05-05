@@ -1,24 +1,21 @@
-"""Event search service using Google Custom Search API.
+"""Event search service using Vertex AI Grounding with Google Search.
 
 Discovers upcoming events (festivals, holidays, sports, conferences) across
-user-specified markets for CRM campaign timing.
+user-specified markets for CRM campaign timing. Uses Gemini's built-in
+Google Search grounding — no Custom Search CX required.
 """
 import json
+import logging
 from datetime import datetime
 
-import httpx
-
-from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
-from backend.app.core.config import get_settings
-from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
+from backend.app.core.vertex_client import get_generative_model
 from backend.app.core.database import get_firestore
 from backend.app.models.schemas import EventResult
 
-settings = get_settings()
+logger = logging.getLogger("vantage.event_search")
 
 
 def _get_admin_model() -> str:
-    """Get the admin-configured default model from Firestore."""
     try:
         db = get_firestore()
         doc = db.collection("admin_settings").document("config").get()
@@ -35,13 +32,13 @@ async def search_events(
     date_range_end: str = "",
     categories: list[str] | None = None,
 ) -> list[EventResult]:
-    """Search for upcoming events across specified markets.
+    """Search for upcoming events using Vertex AI Google Search grounding.
 
     Args:
         markets: List of markets/regions (default: ["India"])
         date_range_start: ISO date string for range start
         date_range_end: ISO date string for range end
-        categories: Event categories to search (festivals, sports, conferences, holidays)
+        categories: Event categories (festivals, sports, conferences, holidays)
 
     Returns:
         List of EventResult objects sorted by relevance
@@ -49,180 +46,104 @@ async def search_events(
     markets = markets or ["India"]
     categories = categories or ["festivals", "holidays", "sports", "conferences"]
 
-    if not settings.GOOGLE_CUSTOM_SEARCH_API_KEY or not settings.GOOGLE_CUSTOM_SEARCH_CX:
-        # Fallback: use Gemini knowledge for events
-        return await _fallback_gemini_events(markets, date_range_start, date_range_end, categories)
-
-    # Build search queries
-    all_results = []
     date_context = ""
-    if date_range_start:
-        date_context = f" {date_range_start}"
-    if date_range_end:
-        date_context += f" to {date_range_end}"
-    if not date_context:
-        # Default to upcoming 3 months
+    if date_range_start and date_range_end:
+        date_context = f"between {date_range_start} and {date_range_end}"
+    elif date_range_start:
+        date_context = f"from {date_range_start} onwards"
+    else:
         now = datetime.now()
-        date_context = f" {now.strftime('%B %Y')} upcoming"
+        date_context = f"in the upcoming 3 months from {now.strftime('%B %Y')}"
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        for market in markets:
-            for category in categories:
-                query = f"upcoming {category} events {market}{date_context}"
+    markets_str = ", ".join(markets)
+    categories_str = ", ".join(categories)
 
-                try:
-                    resp = await client.get(
-                        "https://www.googleapis.com/customsearch/v1",
-                        params={
-                            "key": settings.GOOGLE_CUSTOM_SEARCH_API_KEY,
-                            "cx": settings.GOOGLE_CUSTOM_SEARCH_CX,
-                            "q": query,
-                            "num": 5,  # 5 results per query
-                        },
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
+    prompt = f"""Search the web and find upcoming events {date_context} for these markets: {markets_str}.
 
-                    for item in data.get("items", []):
-                        all_results.append({
-                            "title": item.get("title", ""),
-                            "snippet": item.get("snippet", ""),
-                            "link": item.get("link", ""),
-                            "market": market,
-                            "category": category,
-                        })
-                except Exception:
-                    continue
+Focus on categories: {categories_str}.
 
-    if not all_results:
-        return await _fallback_gemini_events(markets, date_range_start, date_range_end, categories)
+Find events that drive hotel bookings and travel demand — major festivals, national holidays,
+large sports tournaments, business conferences, cultural events, and music/entertainment events.
 
-    # Use Gemini to extract structured event data from search results
-    return await _parse_search_results(all_results, date_range_start, date_range_end)
-
-
-async def _parse_search_results(
-    raw_results: list[dict],
-    date_range_start: str,
-    date_range_end: str,
-) -> list[EventResult]:
-    """Use Gemini to extract structured events from search snippets."""
-    model_name = _get_admin_model()
-
-    results_text = "\n".join(
-        [
-            f"- [{r['market']}/{r['category']}] {r['title']}: {r['snippet']} (Source: {r['link']})"
-            for r in raw_results[:30]  # Limit to 30 results
-        ]
-    )
-
-    date_filter = ""
-    if date_range_start or date_range_end:
-        date_filter = f"\nOnly include events between {date_range_start or 'now'} and {date_range_end or 'next 3 months'}."
-
-    prompt = f"""Extract upcoming events from these search results. Deduplicate and rank by relevance
-for hotel marketing campaigns (events that drive travel demand).{date_filter}
-
-Search Results:
-{results_text}
-
-Return ONLY a JSON array of events:
+Return ONLY a JSON array of the top 15 most relevant events, sorted by relevance_score descending:
 [
   {{
     "title": "Event Name",
     "date": "YYYY-MM-DD or date range string",
     "description": "1-2 sentence description relevant to hotel marketing",
-    "source": "URL source",
-    "market": "Market/Region",
+    "source": "URL or source name",
+    "market": "Market/Region name",
     "relevance_score": 0.0-1.0
   }}
 ]
 
-Sort by relevance_score descending. Max 15 events."""
+Use your web search results to provide accurate dates and current information. Return ONLY the JSON array."""
 
     try:
+        from vertexai.generative_models import Tool, grounding
+
+        search_tool = Tool.from_google_search_retrieval(grounding.GoogleSearchRetrieval())
         model = get_generative_model(
-            model_name,
-            system_instruction="Extract structured event data from search results. Return ONLY valid JSON array.",
+            _get_admin_model(),
+            system_instruction="You are a travel industry event expert. Use Google Search to find real upcoming events. Return ONLY valid JSON array, no markdown.",
+            tools=[search_tool],
         )
         response = model.generate_content(prompt)
 
-        json_str = response.text
+        json_str = response.text.strip()
         if "```json" in json_str:
             json_str = json_str.split("```json")[1].split("```")[0]
         elif "```" in json_str:
             json_str = json_str.split("```")[1].split("```")[0]
 
         events_data = json.loads(json_str.strip())
+        logger.info("Retrieved %d events via Google Search grounding", len(events_data))
 
         return [
             EventResult(
                 title=e.get("title", ""),
                 date=e.get("date", ""),
                 description=e.get("description", ""),
-                source=e.get("source", ""),
-                market=e.get("market", ""),
-                relevance_score=float(e.get("relevance_score", 0)),
+                source=e.get("source", "Google Search"),
+                market=e.get("market", markets[0]),
+                relevance_score=float(e.get("relevance_score", 0.5)),
             )
             for e in events_data
+            if e.get("title")
         ]
-    except Exception:
-        return []
+
+    except Exception as exc:
+        logger.warning("Google Search grounding failed: %s — falling back to Gemini knowledge", exc)
+        return await _fallback_gemini_events(markets, date_context, categories)
 
 
 async def _fallback_gemini_events(
     markets: list[str],
-    date_range_start: str,
-    date_range_end: str,
+    date_context: str,
     categories: list[str],
 ) -> list[EventResult]:
-    """Fallback: use Gemini's knowledge to suggest relevant events when Custom Search is unavailable."""
-    model_name = _get_admin_model()
-
-    date_context = ""
-    if date_range_start:
-        date_context = f"between {date_range_start}"
-    if date_range_end:
-        date_context += f" and {date_range_end}"
-    if not date_context:
-        now = datetime.now()
-        date_context = f"in the upcoming 3 months from {now.strftime('%B %Y')}"
-
+    """Fallback to Gemini knowledge when grounding is unavailable."""
     prompt = f"""List upcoming events {date_context} for these markets: {', '.join(markets)}.
 Focus on categories: {', '.join(categories)}.
+Events should drive hotel bookings (festivals, holidays, sports, conferences).
 
-These events should be relevant for hotel marketing campaigns — events that drive hotel bookings
-and travel demand (festivals, national holidays, major sports events, conferences, etc.).
-
-Return ONLY a JSON array:
-[
-  {{
-    "title": "Event Name",
-    "date": "YYYY-MM-DD or approximate date",
-    "description": "1-2 sentence description for hotel marketing context",
-    "source": "general knowledge",
-    "market": "Market name",
-    "relevance_score": 0.0-1.0
-  }}
-]
-
-Max 15 events, sorted by relevance_score descending."""
+Return ONLY a JSON array, max 15 events, sorted by relevance_score descending:
+[{{"title":"","date":"","description":"","source":"general knowledge","market":"","relevance_score":0.0}}]"""
 
     try:
         model = get_generative_model(
-            model_name,
-            system_instruction="You are a travel industry event expert. Return ONLY valid JSON array.",
+            _get_admin_model(),
+            system_instruction="Return ONLY valid JSON array, no markdown.",
         )
         response = model.generate_content(prompt)
 
-        json_str = response.text
+        json_str = response.text.strip()
         if "```json" in json_str:
             json_str = json_str.split("```json")[1].split("```")[0]
         elif "```" in json_str:
             json_str = json_str.split("```")[1].split("```")[0]
 
         events_data = json.loads(json_str.strip())
-
         return [
             EventResult(
                 title=e.get("title", ""),
@@ -233,6 +154,7 @@ Max 15 events, sorted by relevance_score descending."""
                 relevance_score=float(e.get("relevance_score", 0)),
             )
             for e in events_data
+            if e.get("title")
         ]
     except Exception:
         return []
