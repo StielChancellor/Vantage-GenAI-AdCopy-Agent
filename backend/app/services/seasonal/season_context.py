@@ -13,7 +13,7 @@ from datetime import date, datetime
 class SeasonalContext:
     name: str
     description: str
-    demand_uplift_pct: float  # estimated % uplift (positive = peak demand)
+    demand_uplift_pct: float = 0.0  # estimated % uplift (positive = peak demand)
     keywords: list[str] = field(default_factory=list)
     tone_hint: str = ""
 
@@ -24,61 +24,61 @@ _CALENDAR: list[dict] = [
     # Q1 — New Year, Republic Day, Valentine's
     {"months": [1], "days": (1, 5), "context": SeasonalContext(
         "New Year Celebrations", "New Year parties, staycations, and celebrations",
-        uplift_pct=35, keywords=["New Year", "celebrate", "ring in", "new beginnings"],
+        demand_uplift_pct=35, keywords=["New Year", "celebrate", "ring in", "new beginnings"],
         tone_hint="festive, exciting, celebratory",
     )},
     {"months": [1], "days": (24, 27), "context": SeasonalContext(
         "Republic Day Long Weekend", "Republic Day weekend getaway",
-        uplift_pct=15, keywords=["long weekend", "getaway", "explore", "patriotic"],
+        demand_uplift_pct=15, keywords=["long weekend", "getaway", "explore", "patriotic"],
         tone_hint="patriotic, adventurous",
     )},
     {"months": [2], "days": (12, 16), "context": SeasonalContext(
         "Valentine's Day", "Romantic getaway packages, couples dining",
-        uplift_pct=40, keywords=["romantic", "couples", "love", "anniversary", "intimate"],
+        demand_uplift_pct=40, keywords=["romantic", "couples", "love", "anniversary", "intimate"],
         tone_hint="romantic, warm, intimate",
     )},
     # Q2 — Holi, summer, IPL
     {"months": [3], "days": (1, 31), "context": SeasonalContext(
         "Holi Festival", "Holi celebrations, festive dining, color events",
-        uplift_pct=20, keywords=["Holi", "festive", "colors", "celebrations", "spring"],
+        demand_uplift_pct=20, keywords=["Holi", "festive", "colors", "celebrations", "spring"],
         tone_hint="vibrant, festive, fun",
     )},
     {"months": [4, 5, 6], "days": (1, 31), "context": SeasonalContext(
         "IPL Season & Summer Holidays", "IPL viewing packages, summer staycation, kids activities",
-        uplift_pct=25, keywords=["summer", "staycation", "IPL", "family", "kids", "pool", "escape the heat"],
+        demand_uplift_pct=25, keywords=["summer", "staycation", "IPL", "family", "kids", "pool", "escape the heat"],
         tone_hint="fun, family-friendly, exciting",
     )},
     # Q3 — Monsoon, Independence Day
     {"months": [7, 8, 9], "days": (1, 31), "context": SeasonalContext(
         "Monsoon Season", "Monsoon spa retreats, couples packages, cozy staycations",
-        uplift_pct=-10, keywords=["monsoon", "cozy", "spa", "retreat", "romance", "refresh"],
+        demand_uplift_pct=-10, keywords=["monsoon", "cozy", "spa", "retreat", "romance", "refresh"],
         tone_hint="calm, indulgent, rejuvenating",
     )},
     {"months": [8], "days": (13, 17), "context": SeasonalContext(
         "Independence Day Long Weekend", "Patriotic staycation, family getaway",
-        uplift_pct=20, keywords=["Independence Day", "long weekend", "family", "celebrate India"],
+        demand_uplift_pct=20, keywords=["Independence Day", "long weekend", "family", "celebrate India"],
         tone_hint="patriotic, festive, family",
     )},
     # Q4 — Navratri, Diwali, Christmas, NYE
     {"months": [10], "days": (1, 31), "context": SeasonalContext(
         "Navratri & Festive Season Begins", "Navratri events, garba nights, festive dining",
-        uplift_pct=30, keywords=["Navratri", "festive", "garba", "celebration", "tradition"],
+        demand_uplift_pct=30, keywords=["Navratri", "festive", "garba", "celebration", "tradition"],
         tone_hint="festive, cultural, vibrant",
     )},
     {"months": [10, 11], "days": (20, 10), "context": SeasonalContext(
         "Diwali Season", "Diwali staycation, festive dining, gifting packages, family reunions",
-        uplift_pct=55, keywords=["Diwali", "festive", "celebration", "lights", "family", "gifting", "luxury"],
+        demand_uplift_pct=55, keywords=["Diwali", "festive", "celebration", "lights", "family", "gifting", "luxury"],
         tone_hint="warm, festive, luxurious, celebratory",
     )},
     {"months": [12], "days": (20, 31), "context": SeasonalContext(
         "Christmas & New Year Eve", "Christmas celebrations, NYE parties, family gatherings",
-        uplift_pct=60, keywords=["Christmas", "New Year", "festive", "celebrations", "holiday season", "family"],
+        demand_uplift_pct=60, keywords=["Christmas", "New Year", "festive", "celebrations", "holiday season", "family"],
         tone_hint="festive, warm, celebratory, luxurious",
     )},
     # Wedding season (Nov-Feb)
     {"months": [11, 12, 1, 2], "days": (1, 28), "context": SeasonalContext(
         "Indian Wedding Season", "Wedding venue, honeymoon packages, social events",
-        uplift_pct=45, keywords=["wedding", "banquet", "honeymoon", "reception", "celebration", "venue"],
+        demand_uplift_pct=45, keywords=["wedding", "banquet", "honeymoon", "reception", "celebration", "venue"],
         tone_hint="elegant, grand, celebratory",
     )},
 ]
