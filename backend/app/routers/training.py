@@ -81,11 +81,13 @@ async def upload_training_data(
     hero_columns: str = Form("[]"),
     brand_id: str = Form(""),
     run_id: str = Form(""),
+    remarks: str = Form(""),
     _user=Depends(require_admin),
 ):
     """Upload CSV/text and start training. Routes to the right pipeline based
     on section_type. If run_id is supplied, the client can poll
-    /training/progress/{run_id} for live updates."""
+    /training/progress/{run_id} for live updates. `remarks` is a free-text
+    note attached to the session record for human context."""
     try:
         kpi_list = json.loads(kpi_columns) if kpi_columns else []
     except (json.JSONDecodeError, TypeError):
@@ -120,6 +122,7 @@ async def upload_training_data(
             brand_id=(brand_id or _user.get("name") or "_global"),
             user_id=_user.get("uid", "unknown"),
             run_id_override=run_id or None,
+            remarks=remarks,
         )
 
     # ---------- Legacy AI summarization path ----------
@@ -180,6 +183,7 @@ async def _run_v21_ingestion(
     brand_id: str,
     user_id: str,
     run_id_override: str | None = None,
+    remarks: str = "",
 ) -> TrainingUploadResponse:
     """Adapter → score → embed → BigQuery, all in-process. Returns a
     TrainingUploadResponse with the deterministic stats baked into the
@@ -227,7 +231,7 @@ async def _run_v21_ingestion(
         _persist_session(
             training_run_id, section_type, brand_id, user_id,
             directive_preview, started_at, elapsed,
-            input_tokens=0, cost_inr=0.0,
+            input_tokens=0, cost_inr=0.0, remarks=remarks,
         )
         _update_progress(
             training_run_id, "completed", 100,
@@ -316,7 +320,7 @@ async def _run_v21_ingestion(
     _persist_session(
         training_run_id, section_type, brand_id, user_id,
         directive_preview, started_at, elapsed,
-        input_tokens=input_tokens, cost_inr=cost_inr,
+        input_tokens=input_tokens, cost_inr=cost_inr, remarks=remarks,
     )
 
     _update_progress(
@@ -343,6 +347,7 @@ def _persist_session(
     elapsed_seconds: float,
     input_tokens: int,
     cost_inr: float,
+    remarks: str = "",
 ) -> None:
     """Write a Sessions-row-shaped doc to Firestore so the v2.1 ingestion run
     appears in the Training → Sessions table with cost, time, tokens, etc."""
@@ -365,11 +370,64 @@ def _persist_session(
             "time_seconds": float(elapsed_seconds),
             "cost_inr": float(cost_inr),
             "model_used": _EMBED_MODEL,
+            "remarks": (remarks or "")[:1000],
             "created_at": started_at.isoformat(),
             "completed_at": completed_at.isoformat(),
         }, merge=True)
     except Exception as exc:
         logger.debug("training_state write failed (non-fatal): %s", exc)
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_training_session(session_id: str, _user=Depends(require_admin)):
+    """Delete a training session record + its progress doc + the BigQuery
+    rows it produced. Embeddings in Firestore embedding_cache are kept
+    (content-hash deduped, will be reused or overwritten by future runs)."""
+    db = get_firestore()
+    deleted = {"training_state": False, "ingestion_progress": False, "bq_rows": 0}
+
+    # 1. training_state
+    try:
+        ref = db.collection("training_state").document(session_id)
+        if ref.get().exists:
+            ref.delete()
+            deleted["training_state"] = True
+    except Exception as exc:
+        logger.warning("Failed deleting training_state/%s: %s", session_id, exc)
+
+    # 2. ingestion_progress
+    try:
+        ref = db.collection("ingestion_progress").document(session_id)
+        if ref.get().exists:
+            ref.delete()
+            deleted["ingestion_progress"] = True
+    except Exception as exc:
+        logger.debug("ingestion_progress delete failed: %s", exc)
+
+    # 3. BQ rows where training_run_id = session_id
+    try:
+        import os as _os
+        from google.cloud import bigquery
+        client = bigquery.Client(project=_os.environ.get("GCP_PROJECT_ID", "supple-moon-495404-b0"))
+        dataset = _os.environ.get("BQ_DATASET", "vantage")
+        sql = f"""
+            DELETE FROM `{client.project}.{dataset}.ad_performance_events`
+            WHERE training_run_id = @run_id
+        """
+        job = client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(query_parameters=[
+                bigquery.ScalarQueryParameter("run_id", "STRING", session_id),
+            ]),
+        )
+        job.result()
+        deleted["bq_rows"] = int(job.num_dml_affected_rows or 0)
+    except Exception as exc:
+        logger.warning("BQ delete failed for run %s: %s", session_id, exc)
+
+    if not deleted["training_state"]:
+        raise HTTPException(404, "Session not found.")
+    return {"deleted": True, **deleted}
 
 
 @router.post("/answer", response_model=TrainingUploadResponse)

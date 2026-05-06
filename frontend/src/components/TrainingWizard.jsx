@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   startTraining, getTrainingProgress, answerTraining, getTrainingSessions,
-  getTrainingDirectives, deleteTrainingDirective,
+  getTrainingDirectives, deleteTrainingDirective, deleteTrainingSession,
   exportTrainingSessions, searchKnowledgeBase,
 } from '../services/api';
 import toast from 'react-hot-toast';
@@ -30,6 +30,7 @@ export default function TrainingWizard() {
   const [sectionType, setSectionType] = useState('ad_performance');
   const [trainingMode, setTrainingMode] = useState('csv_only');
   const [textInput, setTextInput] = useState('');
+  const [remarks, setRemarks] = useState('');
   const [uploading, setUploading] = useState(false);
 
   // CSV column handling
@@ -186,6 +187,7 @@ export default function TrainingWizard() {
         kpiColumns,
         heroColumns.filter((h) => h.column),
         runId,
+        remarks,
       );
       stopProgressPolling();
       setProgress({ percent: 100, phase: 'completed', message: 'Training complete', status: 'completed' });
@@ -276,6 +278,21 @@ export default function TrainingWizard() {
     }
   };
 
+  const handleDeleteSession = async (sessionId) => {
+    if (!window.confirm(
+      'Delete this training session?\n\nThis removes the session record and the BigQuery rows it produced. ' +
+      'Embedding cache entries are kept (they will be reused or overwritten by future training runs).'
+    )) return;
+    try {
+      const res = await deleteTrainingSession(sessionId);
+      const bq = res.data?.bq_rows ?? 0;
+      toast.success(`Session deleted${bq > 0 ? ` — ${bq.toLocaleString()} BQ rows removed` : ''}`);
+      loadSessions();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete session');
+    }
+  };
+
   const handleExportSessions = async () => {
     try {
       const res = await exportTrainingSessions();
@@ -299,6 +316,7 @@ export default function TrainingWizard() {
     setKpiColumns([]);
     setHeroColumns([]);
     setTextInput('');
+    setRemarks('');
     setAnswers({});
     setShowSaveMode(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -435,6 +453,22 @@ export default function TrainingWizard() {
             />
           </div>
         )}
+
+        {/* Remarks */}
+        <div className="form-group">
+          <label>
+            Remarks <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>(optional — note about this training run)</span>
+          </label>
+          <textarea
+            className="training-text-input"
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            placeholder="e.g., Q4 Diwali campaign data, Sept-Nov 2025. Includes only Demand Gen and Search ads."
+            rows={2}
+            maxLength={1000}
+            style={{ minHeight: 'auto' }}
+          />
+        </div>
 
         {/* Submit Button */}
         <button
@@ -651,6 +685,8 @@ export default function TrainingWizard() {
                       <th>Cost (₹)</th>
                       <th>Time</th>
                       <th>Date</th>
+                      <th>Remarks</th>
+                      <th style={{ width: 60 }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -670,6 +706,22 @@ export default function TrainingWizard() {
                         </td>
                         <td>{s.time_seconds ? `${s.time_seconds}s` : '-'}</td>
                         <td>{s.created_at ? new Date(s.created_at).toLocaleDateString() : '-'}</td>
+                        <td
+                          style={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.8rem', color: '#6b7280' }}
+                          title={s.remarks || ''}
+                        >
+                          {s.remarks || '—'}
+                        </td>
+                        <td>
+                          <button
+                            className="btn-icon danger"
+                            onClick={() => handleDeleteSession(s.session_id)}
+                            title="Delete session"
+                            style={{ padding: 4 }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
