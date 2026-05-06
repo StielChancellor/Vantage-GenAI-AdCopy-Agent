@@ -61,7 +61,7 @@ export const getUrlSuggestions = (query) => api.get(`/generate/url-suggestions?q
 export const placesAutocomplete = (query) => api.get(`/places/autocomplete?query=${encodeURIComponent(query)}`);
 
 // Training (Admin) — Phase 2.1 revised
-export const startTraining = (file, sectionType, trainingMode, textInput = '', kpiColumns = [], heroColumns = []) => {
+export const startTraining = (file, sectionType, trainingMode, textInput = '', kpiColumns = [], heroColumns = [], runId = '') => {
   const form = new FormData();
   if (file) form.append('file', file);
   form.append('section_type', sectionType);
@@ -69,8 +69,11 @@ export const startTraining = (file, sectionType, trainingMode, textInput = '', k
   form.append('text_input', textInput);
   form.append('kpi_columns', JSON.stringify(kpiColumns));
   form.append('hero_columns', JSON.stringify(heroColumns));
-  return api.post('/training/upload', form);
+  if (runId) form.append('run_id', runId);
+  // Long timeout — embedding 2K+ records can take ~2 minutes synchronously.
+  return api.post('/training/upload', form, { timeout: 600000 });
 };
+export const getTrainingProgress = (runId) => api.get(`/training/progress/${encodeURIComponent(runId)}`);
 export const answerTraining = (data) => api.post('/training/answer', data);
 export const getTrainingSessions = () => api.get('/training/sessions');
 export const getTrainingDirectives = (sectionType = '') => {

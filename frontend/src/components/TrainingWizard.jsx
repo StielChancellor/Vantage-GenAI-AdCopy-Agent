@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  startTraining, answerTraining, getTrainingSessions,
+  startTraining, getTrainingProgress, answerTraining, getTrainingSessions,
   getTrainingDirectives, deleteTrainingDirective,
   exportTrainingSessions, searchKnowledgeBase,
 } from '../services/api';
@@ -44,6 +44,10 @@ export default function TrainingWizard() {
   const [answers, setAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [showSaveMode, setShowSaveMode] = useState(false);
+
+  // Live progress (v2.1 ingestion runs)
+  const [progress, setProgress] = useState(null); // {percent, phase, message, status}
+  const progressPollRef = useRef(null);
 
   // History & Knowledge Base
   const [sessions, setSessions] = useState([]);
@@ -126,8 +130,31 @@ export default function TrainingWizard() {
     setHeroColumns((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const stopProgressPolling = () => {
+    if (progressPollRef.current) {
+      clearInterval(progressPollRef.current);
+      progressPollRef.current = null;
+    }
+  };
+
+  const startProgressPolling = (runId) => {
+    stopProgressPolling();
+    progressPollRef.current = setInterval(async () => {
+      try {
+        const r = await getTrainingProgress(runId);
+        if (r?.data) {
+          setProgress(r.data);
+          if (r.data.status === 'completed' || r.data.status === 'failed') {
+            stopProgressPolling();
+          }
+        }
+      } catch {
+        // Silent — keep polling; transient errors are fine
+      }
+    }, 800);
+  };
+
   const handleUpload = async () => {
-    // Validate inputs
     if (trainingMode !== 'text_only' && !csvFile) {
       toast.error('Please select a CSV file');
       return;
@@ -137,7 +164,19 @@ export default function TrainingWizard() {
       return;
     }
 
+    // Client-supplied run_id lets us start polling progress before the
+    // synchronous /upload response arrives.
+    const runId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     setUploading(true);
+    setProgress({ percent: 0, phase: 'starting', message: 'Uploading file...', status: 'running' });
+
+    // For v2.1 ingestion section types, poll progress live
+    const isV21 = sectionType === 'google_ads_export' || sectionType === 'moengage_push';
+    if (isV21) startProgressPolling(runId);
+
     try {
       const res = await startTraining(
         trainingMode !== 'text_only' ? csvFile : null,
@@ -145,8 +184,11 @@ export default function TrainingWizard() {
         trainingMode,
         textInput,
         kpiColumns,
-        heroColumns.filter((h) => h.column), // Remove empty entries
+        heroColumns.filter((h) => h.column),
+        runId,
       );
+      stopProgressPolling();
+      setProgress({ percent: 100, phase: 'completed', message: 'Training complete', status: 'completed' });
       setSession(res.data);
 
       // Initialize answers
@@ -172,11 +214,16 @@ export default function TrainingWizard() {
         toast.success('Data analyzed — review AI questions below');
       }
     } catch (err) {
+      stopProgressPolling();
+      setProgress({ percent: 0, phase: 'failed', message: err.response?.data?.detail || 'Upload failed', status: 'failed' });
       toast.error(err.response?.data?.detail || 'Upload failed');
     } finally {
       setUploading(false);
     }
   };
+
+  // Cleanup the poll on unmount
+  useEffect(() => () => stopProgressPolling(), []);
 
   const handleSubmitAnswers = async (approve = false, saveMode = null) => {
     setSubmitting(true);
@@ -402,6 +449,46 @@ export default function TrainingWizard() {
             <><Upload size={16} /> Start Model Training</>
           )}
         </button>
+
+        {/* Live progress bar (v2.1 ingestion) */}
+        {progress && (
+          <div
+            style={{
+              marginTop: '1rem',
+              padding: '0.75rem 1rem',
+              border: '1px solid var(--border, #e5e7eb)',
+              borderRadius: 8,
+              background: progress.status === 'failed' ? '#fef2f2' : progress.status === 'completed' ? '#f0fdf4' : '#f9fafb',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.85rem' }}>
+              <span style={{ fontWeight: 500 }}>
+                {progress.status === 'failed' ? '❌ Failed'
+                  : progress.status === 'completed' ? '✅ Complete'
+                  : `⏳ ${progress.phase || 'Processing'}`}
+              </span>
+              <span style={{ color: '#6b7280' }}>{progress.percent || 0}%</span>
+            </div>
+            <div style={{ height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${Math.min(100, progress.percent || 0)}%`,
+                  height: '100%',
+                  background: progress.status === 'failed'
+                    ? '#ef4444'
+                    : progress.status === 'completed'
+                    ? '#10b981'
+                    : 'linear-gradient(90deg, #d4a017, #f59e0b)',
+                  transition: 'width 0.4s ease',
+                }}
+              />
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: 6 }}>
+              {progress.message || ''}
+              {progress.total ? ` (${progress.processed || 0} / ${progress.total})` : ''}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Q&A Section */}

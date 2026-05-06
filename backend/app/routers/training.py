@@ -54,6 +54,23 @@ def _read_csv_robust(contents: bytes) -> pd.DataFrame:
     )
 
 
+@router.get("/progress/{run_id}")
+async def get_training_progress(run_id: str, _user=Depends(require_admin)):
+    """Live progress for an in-flight v2.1 ingestion run. Polled by the
+    frontend every ~800ms while a training_run is uploading. Returns:
+        {phase, processed, total, percent, message, status}
+    `status` is 'running' until completion, then 'completed' or 'failed'.
+    Returns {percent: 0, status: 'pending'} if no doc yet (request is mid-flight)."""
+    try:
+        db = get_firestore()
+        doc = db.collection("ingestion_progress").document(run_id).get()
+        if doc.exists:
+            return doc.to_dict()
+    except Exception as exc:
+        logger.debug("progress fetch failed: %s", exc)
+    return {"percent": 0, "phase": "starting", "status": "pending", "message": "Initializing..."}
+
+
 @router.post("/upload", response_model=TrainingUploadResponse)
 async def upload_training_data(
     file: UploadFile = File(None),
@@ -63,10 +80,12 @@ async def upload_training_data(
     kpi_columns: str = Form("[]"),
     hero_columns: str = Form("[]"),
     brand_id: str = Form(""),
+    run_id: str = Form(""),
     _user=Depends(require_admin),
 ):
     """Upload CSV/text and start training. Routes to the right pipeline based
-    on section_type."""
+    on section_type. If run_id is supplied, the client can poll
+    /training/progress/{run_id} for live updates."""
     try:
         kpi_list = json.loads(kpi_columns) if kpi_columns else []
     except (json.JSONDecodeError, TypeError):
@@ -100,6 +119,7 @@ async def upload_training_data(
             section_type=section_type,
             brand_id=(brand_id or _user.get("name") or "_global"),
             user_id=_user.get("uid", "unknown"),
+            run_id_override=run_id or None,
         )
 
     # ---------- Legacy AI summarization path ----------
@@ -129,11 +149,37 @@ def _embed_cost_inr(total_tokens: int) -> float:
     return round(cost_usd * _USD_TO_INR, 6)
 
 
+def _update_progress(
+    run_id: str,
+    phase: str,
+    percent: int,
+    message: str,
+    processed: int = 0,
+    total: int = 0,
+    status: str = "running",
+) -> None:
+    """Write live progress to Firestore so the frontend polling endpoint sees it."""
+    try:
+        db = get_firestore()
+        db.collection("ingestion_progress").document(run_id).set({
+            "phase": phase,
+            "percent": int(percent),
+            "message": message,
+            "processed": int(processed),
+            "total": int(total),
+            "status": status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }, merge=True)
+    except Exception as exc:
+        logger.debug("progress write failed (non-fatal): %s", exc)
+
+
 async def _run_v21_ingestion(
     df: pd.DataFrame,
     section_type: str,
     brand_id: str,
     user_id: str,
+    run_id_override: str | None = None,
 ) -> TrainingUploadResponse:
     """Adapter → score → embed → BigQuery, all in-process. Returns a
     TrainingUploadResponse with the deterministic stats baked into the
@@ -148,14 +194,20 @@ async def _run_v21_ingestion(
     from backend.app.services.embedding.vertex_embedder import embed_records
     from backend.app.services.analytics.bq_writer import write_normalized_records
 
-    training_run_id = str(uuid.uuid4())
+    training_run_id = run_id_override or str(uuid.uuid4())
     started_at = datetime.now(timezone.utc)
     start_time = time.time()
 
+    _update_progress(training_run_id, "validating", 5, "Validating CSV schema...", total=len(df))
     report = validate_csv(df, section_type)
     if not report.passed:
+        _update_progress(
+            training_run_id, "failed", 0, f"Validation failed: {report.rejection_reason}",
+            status="failed",
+        )
         raise HTTPException(400, f"Validation failed: {report.rejection_reason}")
 
+    _update_progress(training_run_id, "parsing", 15, f"Parsing {section_type} schema...", total=len(df))
     if section_type == "google_ads_export":
         records = parse_google_ads(df)
     else:
@@ -177,6 +229,11 @@ async def _run_v21_ingestion(
             directive_preview, started_at, elapsed,
             input_tokens=0, cost_inr=0.0,
         )
+        _update_progress(
+            training_run_id, "completed", 100,
+            "No usable records — input was empty or all rows had zero impressions.",
+            status="completed",
+        )
         return TrainingUploadResponse(
             session_id=training_run_id,
             status="completed",
@@ -184,9 +241,19 @@ async def _run_v21_ingestion(
             directive_preview=directive_preview,
         )
 
+    _update_progress(
+        training_run_id, "scoring", 25,
+        f"Scoring {len(records)} records (recency × impressions × CTR)...",
+        total=len(records),
+    )
     score_records(records)
     quality = quality_report_from_records(records, section_type)
 
+    _update_progress(
+        training_run_id, "writing_bq", 30,
+        "Writing performance data to BigQuery...",
+        total=len(records),
+    )
     try:
         await write_normalized_records(records, brand_id=brand_id, training_run_id=training_run_id)
     except Exception as exc:
@@ -197,7 +264,14 @@ async def _run_v21_ingestion(
     total_chars = 0
     eligible = [r for r in records if r.performance_score > 0]
     BATCH = 50
-    for i in range(0, len(eligible), BATCH):
+    total_eligible = len(eligible)
+    n_batches = max(1, (total_eligible + BATCH - 1) // BATCH)
+    _update_progress(
+        training_run_id, "embedding", 35,
+        f"Embedding {total_eligible} records in {n_batches} batches...",
+        total=total_eligible,
+    )
+    for i in range(0, total_eligible, BATCH):
         chunk = eligible[i:i + BATCH]
         chunk_chars = sum(len(r.as_embedding_text()) for r in chunk)
         try:
@@ -212,6 +286,14 @@ async def _run_v21_ingestion(
         except Exception as exc:
             logger.warning("Embed batch %d failed for run %s: %s", i // BATCH, training_run_id, exc)
             embed_errors.append(str(exc)[:200])
+
+        # 35% to 95% scaled by batch progress
+        pct = 35 + int(60 * (i + len(chunk)) / max(total_eligible, 1))
+        _update_progress(
+            training_run_id, "embedding", min(95, pct),
+            f"Embedded {embedded_count}/{total_eligible} records...",
+            processed=embedded_count, total=total_eligible,
+        )
 
     elapsed = round(time.time() - start_time, 2)
     input_tokens = total_chars // 4 if total_chars else 0
@@ -235,6 +317,12 @@ async def _run_v21_ingestion(
         training_run_id, section_type, brand_id, user_id,
         directive_preview, started_at, elapsed,
         input_tokens=input_tokens, cost_inr=cost_inr,
+    )
+
+    _update_progress(
+        training_run_id, "completed", 100,
+        f"Training complete — {embedded_count} records embedded, {len(records) - len(eligible)} below floor. Cost: ₹{cost_inr:.4f}, time: {elapsed}s.",
+        processed=embedded_count, total=total_eligible, status="completed",
     )
 
     return TrainingUploadResponse(
