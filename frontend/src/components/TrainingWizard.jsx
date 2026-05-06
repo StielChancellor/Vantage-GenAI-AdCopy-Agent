@@ -155,7 +155,22 @@ export default function TrainingWizard() {
         initAnswers[q.question_id] = q.default || '';
       });
       setAnswers(initAnswers);
-      toast.success('Data analyzed — review AI questions below');
+
+      // v2.1 deterministic ingestion — no Q&A flow, just stats
+      const dp = res.data.directive_preview || {};
+      if (res.data.status === 'approved' && dp.format) {
+        const embedded = dp.embedded ?? 0;
+        const skipped = dp.skipped_low_volume ?? 0;
+        const quality = (dp.quality_score ?? 0).toFixed(2);
+        toast.success(
+          `Trained on ${dp.source_rows} CSV rows → ${dp.normalized_records} records, ` +
+          `${embedded} embedded (${skipped} below impression floor). Quality: ${quality}`,
+          { duration: 8000 }
+        );
+        loadSessions();
+      } else {
+        toast.success('Data analyzed — review AI questions below');
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Upload failed');
     } finally {
@@ -382,9 +397,9 @@ export default function TrainingWizard() {
           style={{ marginTop: '0.5rem' }}
         >
           {uploading ? (
-            <><div className="loading-spinner" style={{ width: 16, height: 16 }} /> Analyzing...</>
+            <><div className="loading-spinner" style={{ width: 16, height: 16 }} /> Training Model...</>
           ) : (
-            <><Upload size={16} /> Start Analysis</>
+            <><Upload size={16} /> Start Model Training</>
           )}
         </button>
       </div>

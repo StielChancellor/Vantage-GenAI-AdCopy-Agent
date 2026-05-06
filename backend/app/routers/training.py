@@ -1,10 +1,13 @@
 """Training API endpoints — Phase 2.1 overhaul.
 
-Supports 3 modes (CSV, Text, CSV+Text), 3 section types, hero/KPI columns,
-append/replace, session export, and knowledge base search.
+Supports 3 modes (CSV, Text, CSV+Text), generic section types (legacy AI
+summarization flow), and adapter section types (v2.1 deterministic ingestion
+pipeline: validate → score → embed → BQ).
 """
 import io
 import json
+import logging
+import uuid
 
 import pandas as pd
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
@@ -21,7 +24,32 @@ from backend.app.services.training_engine import (
     export_sessions_csv,
 )
 
+logger = logging.getLogger("vantage.training")
 router = APIRouter(prefix="/training", tags=["training"])
+
+
+# Section types that bypass the AI summarization flow and run the v2.1
+# deterministic ingestion pipeline (adapter → score → embed → BQ).
+_ADAPTER_SECTION_TYPES = {"google_ads_export", "moengage_push"}
+
+
+def _read_csv_robust(contents: bytes) -> pd.DataFrame:
+    """Try several encodings — Windows-1252 is common for Google Ads exports
+    (smart quotes, em-dashes), MoEngage uses UTF-8."""
+    last_error: Exception | None = None
+    for encoding in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return pd.read_csv(io.BytesIO(contents), encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+        except Exception as exc:
+            # Other errors (parse, etc.) — re-raise immediately
+            raise
+    raise HTTPException(
+        400,
+        f"Could not decode CSV. Tried utf-8, cp1252, latin-1. Last error: {last_error}",
+    )
 
 
 @router.post("/upload", response_model=TrainingUploadResponse)
@@ -32,10 +60,11 @@ async def upload_training_data(
     text_input: str = Form(""),
     kpi_columns: str = Form("[]"),
     hero_columns: str = Form("[]"),
+    brand_id: str = Form(""),
     _user=Depends(require_admin),
 ):
-    """Upload CSV/text and start AI training session."""
-    # Parse JSON-encoded form fields
+    """Upload CSV/text and start training. Routes to the right pipeline based
+    on section_type."""
     try:
         kpi_list = json.loads(kpi_columns) if kpi_columns else []
     except (json.JSONDecodeError, TypeError):
@@ -46,7 +75,6 @@ async def upload_training_data(
     except (json.JSONDecodeError, TypeError):
         hero_list = []
 
-    # Validate mode + file
     df = None
     if training_mode in ("csv_only", "csv_and_text"):
         if not file or not file.filename:
@@ -54,14 +82,26 @@ async def upload_training_data(
         if not file.filename.endswith(".csv"):
             raise HTTPException(400, "Only CSV files are supported.")
         contents = await file.read()
-        df = pd.read_csv(io.BytesIO(contents))
+        df = _read_csv_robust(contents)
         if df.empty:
             raise HTTPException(400, "CSV file is empty.")
 
     if training_mode == "text_only" and not text_input.strip():
         raise HTTPException(400, "Text input required for text-only training mode.")
 
-    result = start_training_session(
+    # ---------- v2.1 adapter ingestion path ----------
+    if section_type in _ADAPTER_SECTION_TYPES:
+        if df is None:
+            raise HTTPException(400, f"section_type={section_type} requires a CSV file.")
+        return await _run_v21_ingestion(
+            df=df,
+            section_type=section_type,
+            brand_id=(brand_id or _user.get("name") or "_global"),
+            user_id=_user.get("uid", "unknown"),
+        )
+
+    # ---------- Legacy AI summarization path ----------
+    return start_training_session(
         section_type=section_type,
         training_mode=training_mode,
         df=df,
@@ -69,7 +109,124 @@ async def upload_training_data(
         kpi_columns=kpi_list,
         hero_columns=hero_list,
     )
-    return result
+
+
+async def _run_v21_ingestion(
+    df: pd.DataFrame,
+    section_type: str,
+    brand_id: str,
+    user_id: str,
+) -> TrainingUploadResponse:
+    """Adapter → score → embed → BigQuery, all in-process. Returns a
+    TrainingUploadResponse with the deterministic stats baked into the
+    directive_preview so the existing UI can render them."""
+    from backend.app.services.ingestion.csv_validator import validate_csv
+    from backend.app.services.ingestion.adapters import parse_google_ads, parse_moengage
+    from backend.app.services.analytics.quality_scorer import (
+        score_records, quality_report_from_records,
+    )
+    from backend.app.services.embedding.vertex_embedder import embed_records
+    from backend.app.services.analytics.bq_writer import write_normalized_records
+
+    training_run_id = str(uuid.uuid4())
+
+    report = validate_csv(df, section_type)
+    if not report.passed:
+        raise HTTPException(400, f"Validation failed: {report.rejection_reason}")
+
+    if section_type == "google_ads_export":
+        records = parse_google_ads(df)
+    else:
+        records = parse_moengage(df)
+
+    if not records:
+        return TrainingUploadResponse(
+            session_id=training_run_id,
+            status="completed",
+            questions=[],
+            directive_preview={
+                "format": section_type,
+                "source_rows": int(len(df)),
+                "normalized_records": 0,
+                "embedded": 0,
+                "skipped_low_volume": 0,
+                "quality_score": 0.0,
+                "warning": "Adapter produced 0 records — input may be empty or all rows had zero impressions.",
+            },
+        )
+
+    score_records(records)
+    quality = quality_report_from_records(records, section_type)
+
+    try:
+        await write_normalized_records(records, brand_id=brand_id, training_run_id=training_run_id)
+    except Exception as exc:
+        logger.warning("BQ write failed for run %s: %s", training_run_id, exc)
+
+    embedded_count = 0
+    embed_errors: list[str] = []
+    eligible = [r for r in records if r.performance_score > 0]
+    BATCH = 50
+    for i in range(0, len(eligible), BATCH):
+        chunk = eligible[i:i + BATCH]
+        try:
+            docs = await embed_records(
+                chunk,
+                brand_id=brand_id,
+                training_run_id=training_run_id,
+                section_type=section_type,
+            )
+            embedded_count += len(docs)
+        except Exception as exc:
+            logger.warning("Embed batch %d failed for run %s: %s", i // BATCH, training_run_id, exc)
+            embed_errors.append(str(exc)[:200])
+
+    # Persist a minimal training_state doc so the run shows up in the Sessions list
+    try:
+        db = get_firestore()
+        db.collection("training_state").document(training_run_id).set({
+            "session_id": training_run_id,
+            "section_type": section_type,
+            "training_mode": "csv_only",
+            "status": "approved",  # Deterministic ingestion is auto-approved
+            "directive_preview": {
+                "format": section_type,
+                "source_rows": int(len(df)),
+                "normalized_records": len(records),
+                "embedded": embedded_count,
+                "skipped_low_volume": len(records) - len(eligible),
+                "quality_score": quality.quality_score,
+                "quality_passed": quality.passed,
+                "avg_performance_score": quality.avg_performance_score,
+                "warnings": quality.warnings,
+                "embed_errors": embed_errors[:5],
+            },
+            "questions": [],
+            "answers": [],
+            "brand_id": brand_id,
+            "user_id": user_id,
+        }, merge=True)
+    except Exception as exc:
+        logger.debug("training_state write failed (non-fatal): %s", exc)
+
+    return TrainingUploadResponse(
+        session_id=training_run_id,
+        status="approved",
+        questions=[],
+        directive_preview={
+            "format": section_type,
+            "source_rows": int(len(df)),
+            "normalized_records": len(records),
+            "embedded": embedded_count,
+            "skipped_low_volume": len(records) - len(eligible),
+            "quality_score": quality.quality_score,
+            "quality_passed": quality.passed,
+            "avg_performance_score": quality.avg_performance_score,
+            "records_above_floor": quality.records_above_floor,
+            "warnings": quality.warnings,
+            "embed_errors": embed_errors[:5],
+        },
+    )
 
 
 @router.post("/answer", response_model=TrainingUploadResponse)
