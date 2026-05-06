@@ -7,7 +7,9 @@ pipeline: validate → score → embed → BQ).
 import io
 import json
 import logging
+import time
 import uuid
+from datetime import datetime, timezone
 
 import pandas as pd
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
@@ -111,6 +113,22 @@ async def upload_training_data(
     )
 
 
+# Vertex AI text-embedding-005 pricing: $0.025 per 1M input tokens.
+# 1 token ≈ 4 characters of English text.
+_EMBED_USD_PER_M_TOKENS = 0.025
+_USD_TO_INR = 85
+_EMBED_MODEL = "text-embedding-005"
+
+
+def _approx_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+def _embed_cost_inr(total_tokens: int) -> float:
+    cost_usd = (total_tokens / 1_000_000) * _EMBED_USD_PER_M_TOKENS
+    return round(cost_usd * _USD_TO_INR, 6)
+
+
 async def _run_v21_ingestion(
     df: pd.DataFrame,
     section_type: str,
@@ -119,7 +137,9 @@ async def _run_v21_ingestion(
 ) -> TrainingUploadResponse:
     """Adapter → score → embed → BigQuery, all in-process. Returns a
     TrainingUploadResponse with the deterministic stats baked into the
-    directive_preview so the existing UI can render them."""
+    directive_preview AND populates Sessions-table fields (cost_inr,
+    time_seconds, input_tokens, model_used, created_at) so the run shows
+    up cleanly in the existing Sessions UI."""
     from backend.app.services.ingestion.csv_validator import validate_csv
     from backend.app.services.ingestion.adapters import parse_google_ads, parse_moengage
     from backend.app.services.analytics.quality_scorer import (
@@ -129,6 +149,8 @@ async def _run_v21_ingestion(
     from backend.app.services.analytics.bq_writer import write_normalized_records
 
     training_run_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc)
+    start_time = time.time()
 
     report = validate_csv(df, section_type)
     if not report.passed:
@@ -140,19 +162,26 @@ async def _run_v21_ingestion(
         records = parse_moengage(df)
 
     if not records:
+        elapsed = round(time.time() - start_time, 2)
+        directive_preview = {
+            "format": section_type,
+            "source_rows": int(len(df)),
+            "normalized_records": 0,
+            "embedded": 0,
+            "skipped_low_volume": 0,
+            "quality_score": 0.0,
+            "warning": "Adapter produced 0 records — input may be empty or all rows had zero impressions.",
+        }
+        _persist_session(
+            training_run_id, section_type, brand_id, user_id,
+            directive_preview, started_at, elapsed,
+            input_tokens=0, cost_inr=0.0,
+        )
         return TrainingUploadResponse(
             session_id=training_run_id,
             status="completed",
             questions=[],
-            directive_preview={
-                "format": section_type,
-                "source_rows": int(len(df)),
-                "normalized_records": 0,
-                "embedded": 0,
-                "skipped_low_volume": 0,
-                "quality_score": 0.0,
-                "warning": "Adapter produced 0 records — input may be empty or all rows had zero impressions.",
-            },
+            directive_preview=directive_preview,
         )
 
     score_records(records)
@@ -165,10 +194,12 @@ async def _run_v21_ingestion(
 
     embedded_count = 0
     embed_errors: list[str] = []
+    total_chars = 0
     eligible = [r for r in records if r.performance_score > 0]
     BATCH = 50
     for i in range(0, len(eligible), BATCH):
         chunk = eligible[i:i + BATCH]
+        chunk_chars = sum(len(r.as_embedding_text()) for r in chunk)
         try:
             docs = await embed_records(
                 chunk,
@@ -177,11 +208,57 @@ async def _run_v21_ingestion(
                 section_type=section_type,
             )
             embedded_count += len(docs)
+            total_chars += chunk_chars
         except Exception as exc:
             logger.warning("Embed batch %d failed for run %s: %s", i // BATCH, training_run_id, exc)
             embed_errors.append(str(exc)[:200])
 
-    # Persist a minimal training_state doc so the run shows up in the Sessions list
+    elapsed = round(time.time() - start_time, 2)
+    input_tokens = total_chars // 4 if total_chars else 0
+    cost_inr = _embed_cost_inr(input_tokens)
+
+    directive_preview = {
+        "format": section_type,
+        "source_rows": int(len(df)),
+        "normalized_records": len(records),
+        "embedded": embedded_count,
+        "skipped_low_volume": len(records) - len(eligible),
+        "quality_score": quality.quality_score,
+        "quality_passed": quality.passed,
+        "avg_performance_score": quality.avg_performance_score,
+        "records_above_floor": quality.records_above_floor,
+        "warnings": quality.warnings,
+        "embed_errors": embed_errors[:5],
+    }
+
+    _persist_session(
+        training_run_id, section_type, brand_id, user_id,
+        directive_preview, started_at, elapsed,
+        input_tokens=input_tokens, cost_inr=cost_inr,
+    )
+
+    return TrainingUploadResponse(
+        session_id=training_run_id,
+        status="approved",
+        questions=[],
+        directive_preview=directive_preview,
+    )
+
+
+def _persist_session(
+    training_run_id: str,
+    section_type: str,
+    brand_id: str,
+    user_id: str,
+    directive_preview: dict,
+    started_at: datetime,
+    elapsed_seconds: float,
+    input_tokens: int,
+    cost_inr: float,
+) -> None:
+    """Write a Sessions-row-shaped doc to Firestore so the v2.1 ingestion run
+    appears in the Training → Sessions table with cost, time, tokens, etc."""
+    completed_at = datetime.now(timezone.utc)
     try:
         db = get_firestore()
         db.collection("training_state").document(training_run_id).set({
@@ -189,44 +266,22 @@ async def _run_v21_ingestion(
             "section_type": section_type,
             "training_mode": "csv_only",
             "status": "approved",  # Deterministic ingestion is auto-approved
-            "directive_preview": {
-                "format": section_type,
-                "source_rows": int(len(df)),
-                "normalized_records": len(records),
-                "embedded": embedded_count,
-                "skipped_low_volume": len(records) - len(eligible),
-                "quality_score": quality.quality_score,
-                "quality_passed": quality.passed,
-                "avg_performance_score": quality.avg_performance_score,
-                "warnings": quality.warnings,
-                "embed_errors": embed_errors[:5],
-            },
+            "directive_preview": directive_preview,
             "questions": [],
             "answers": [],
             "brand_id": brand_id,
             "user_id": user_id,
+            "save_mode": "append",
+            "input_tokens": int(input_tokens),
+            "output_tokens": 0,
+            "time_seconds": float(elapsed_seconds),
+            "cost_inr": float(cost_inr),
+            "model_used": _EMBED_MODEL,
+            "created_at": started_at.isoformat(),
+            "completed_at": completed_at.isoformat(),
         }, merge=True)
     except Exception as exc:
         logger.debug("training_state write failed (non-fatal): %s", exc)
-
-    return TrainingUploadResponse(
-        session_id=training_run_id,
-        status="approved",
-        questions=[],
-        directive_preview={
-            "format": section_type,
-            "source_rows": int(len(df)),
-            "normalized_records": len(records),
-            "embedded": embedded_count,
-            "skipped_low_volume": len(records) - len(eligible),
-            "quality_score": quality.quality_score,
-            "quality_passed": quality.passed,
-            "avg_performance_score": quality.avg_performance_score,
-            "records_above_floor": quality.records_above_floor,
-            "warnings": quality.warnings,
-            "embed_errors": embed_errors[:5],
-        },
-    )
 
 
 @router.post("/answer", response_model=TrainingUploadResponse)
