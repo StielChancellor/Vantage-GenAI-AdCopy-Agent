@@ -1,7 +1,33 @@
 # Vantage GenAI — Memory
 
 A running record of where the project is. Read this first when picking the
-work back up. Last updated: 2026-05-07 (App v2.3).
+work back up. Last updated: 2026-05-07 (App v2.3, post-unification patch).
+
+## v2.3.1 hotfix (2026-05-07)
+
+- **Unified color scheme.** Legacy `--gold/--primary` tokens redefined in
+  `frontend/src/index.css` to point at the Editorial Mono red accent
+  (`#c8331e` light / `#e85a44` dark). 8 hardcoded `rgba(201,168,76,*)`
+  values that survived the token swap (vite was minifying them to
+  `#c9a84c*` in the bundle) were also replaced with the red equivalent.
+  `Login.jsx` Zap icon switched from hardcoded `#c9a84c` to `var(--primary)`.
+- **My Account resilience.** Frontend uses `Promise.allSettled` so a failing
+  `/auth/me/billing` no longer blanks the page. Backend `/auth/me` wraps
+  `_user_to_out` (and its scope-summary lookups) in try/except + falls back
+  to a minimal `UserOut`. `/auth/me/billing` retries without the composite
+  `where + order_by` index when Firestore raises.
+- **Admin tabs reorganized.** `Hotels Ingestion` and `Knowledge Base` are
+  now inner tabs of `/admin` alongside `Users / Training / Audit & Usage /
+  LLM Settings`. The standalone sidebar links to those routes were removed.
+  Routes `/admin/hotels` and `/admin/knowledge` are still mounted in
+  `App.jsx` for backward compatibility.
+- **Training tab cleanup.** `TrainingWizard` no longer renders the inner
+  `Directives` + `Knowledge Base` panels. `Sessions` is the only sub-panel.
+  Unused handlers (`handleDeleteDirective`, `loadDirectives`, KB search) and
+  imports removed.
+- **Cloud Build invocation note.** `cloudbuild.yaml` references `$COMMIT_SHA`
+  which is empty for `gcloud builds submit` runs. Pass it explicitly:
+  `gcloud builds submit --config cloudbuild.yaml --substitutions=COMMIT_SHA=manual-<ts> .`
 
 ---
 
