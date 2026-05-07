@@ -11,6 +11,8 @@ import AppLayout from './components/AppLayout';
 import MyAccount from './pages/MyAccount';
 import HotelsIngestion from './pages/admin/HotelsIngestion';
 import KnowledgeBase from './pages/admin/KnowledgeBase';
+import Hub from './pages/Hub';
+import MarketingCalendar from './pages/MarketingCalendar';
 import './styles/editorial-mono.css';
 
 function ProtectedRoute({ children }) {
@@ -32,13 +34,15 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/" element={user ? <Navigate to="/adcopy" /> : <LandingPage />} />
-      <Route path="/login" element={user ? <Navigate to="/adcopy" /> : <Login />} />
+      <Route path="/" element={user ? <Navigate to="/hub" /> : <LandingPage />} />
+      <Route path="/login" element={user ? <Navigate to="/hub" /> : <Login />} />
 
       {/* Authenticated routes with sidebar layout */}
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+        <Route path="/hub" element={<Hub />} />
         <Route path="/adcopy" element={<Dashboard />} />
         <Route path="/crm" element={<CRMWizard />} />
+        <Route path="/calendar" element={<MarketingCalendar />} />
         <Route path="/account" element={<MyAccount />} />
         <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
         <Route path="/admin/hotels" element={<RequireAdmin><HotelsIngestion /></RequireAdmin>} />
@@ -46,7 +50,7 @@ function AppRoutes() {
       </Route>
 
       {/* Backward compatibility redirect */}
-      <Route path="/dashboard" element={<Navigate to="/adcopy" replace />} />
+      <Route path="/dashboard" element={<Navigate to="/hub" replace />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );

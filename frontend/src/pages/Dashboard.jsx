@@ -53,6 +53,24 @@ export default function Dashboard() {
   // Refinement
   const [refining, setRefining] = useState(false);
 
+  // v2.3 keyboard shortcuts: ⌘⏎ generate, ⌘K toggle copilot
+  useEffect(() => {
+    const onKey = (e) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const formEl = document.querySelector('form.campaign-form');
+        if (formEl) formEl.requestSubmit();
+      } else if (e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setViewMode((v) => (v === 'copilot' ? 'builder' : 'copilot'));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // URL suggestions debounce
   useEffect(() => {
     if (urlInput.length < 3) {
@@ -399,9 +417,15 @@ export default function Dashboard() {
               </div>
             )}
 
-            <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
-              {loading ? 'Generating...' : <><Zap size={16} /> Generate Ad Copy</>}
-            </button>
+            <div className="em-builder-foot" style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--em-line)' }}>
+              <div className="em-kbd-hint">
+                <span className="k">⌘</span> <span className="k">⏎</span> generate ·
+                {' '}<span className="k">⌘</span> <span className="k">K</span> switch to Copilot
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={loading}>
+                {loading ? 'Generating...' : <><Zap size={16} /> Generate Ad Copy</>}
+              </button>
+            </div>
           </form>
         </div>
 

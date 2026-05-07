@@ -2,8 +2,9 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../contexts/ThemeContext';
 import { logout as apiLogout } from '../services/api';
-import { Zap, Megaphone, Mail, Settings, LogOut, Sun, Moon, User, Building, BookOpen } from 'lucide-react';
+import { Zap, Megaphone, Mail, Settings, LogOut, Sun, Moon, User, Building, BookOpen, Home, Calendar } from 'lucide-react';
 import { APP_VERSION, APP_VERSION_DATE } from '../version';
+import TweaksPanel from './TweaksPanel';
 
 export default function AppLayout() {
   const { user, logoutUser } = useAuth();
@@ -32,6 +33,10 @@ export default function AppLayout() {
         </div>
 
         <nav className="sidebar-nav">
+          <NavLink to="/hub" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+            <Home size={18} />
+            <span>Home</span>
+          </NavLink>
           <NavLink to="/adcopy" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Megaphone size={18} />
             <span>Ad Copy</span>
@@ -39,6 +44,10 @@ export default function AppLayout() {
           <NavLink to="/crm" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Mail size={18} />
             <span>CRM</span>
+          </NavLink>
+          <NavLink to="/calendar" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+            <Calendar size={18} />
+            <span>Marketing Calendar</span>
           </NavLink>
           <NavLink to="/account" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <User size={18} />
@@ -97,6 +106,7 @@ export default function AppLayout() {
 
       <main className="app-main">
         <Outlet />
+        <TweaksPanel />
       </main>
     </div>
   );
