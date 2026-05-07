@@ -10,7 +10,9 @@ import {
 import toast from 'react-hot-toast';
 import TrainingWizard from '../components/TrainingWizard';
 import UserForm from '../components/admin/UserForm';
-import { Users, Activity, Trash2, Settings, Download, Brain } from 'lucide-react';
+import HotelsIngestion from './admin/HotelsIngestion';
+import KnowledgeBase from './admin/KnowledgeBase';
+import { Users, Activity, Trash2, Settings, Download, Brain, Building, BookOpen } from 'lucide-react';
 
 export default function Admin() {
   const { user } = useAuth();
@@ -132,8 +134,14 @@ export default function Admin() {
           <button className={`tab ${tab === 'logs' ? 'active' : ''}`} onClick={() => { setTab('logs'); loadLogs(); loadStats(); }}>
             <Activity size={16} /> <span className="tab-label">Audit & Usage</span>
           </button>
+          <button className={`tab ${tab === 'hotels' ? 'active' : ''}`} onClick={() => setTab('hotels')}>
+            <Building size={16} /> <span className="tab-label">Hotels Ingestion</span>
+          </button>
+          <button className={`tab ${tab === 'knowledge' ? 'active' : ''}`} onClick={() => setTab('knowledge')}>
+            <BookOpen size={16} /> <span className="tab-label">Knowledge Base</span>
+          </button>
           <button className={`tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => { setTab('settings'); loadSettings(); }}>
-            <Settings size={16} /> <span className="tab-label">Settings</span>
+            <Settings size={16} /> <span className="tab-label">LLM Settings</span>
           </button>
         </div>
 
@@ -176,6 +184,18 @@ export default function Admin() {
 
         {tab === 'training' && (
           <TrainingWizard />
+        )}
+
+        {tab === 'hotels' && (
+          <div className="admin-panel">
+            <HotelsIngestion />
+          </div>
+        )}
+
+        {tab === 'knowledge' && (
+          <div className="admin-panel">
+            <KnowledgeBase />
+          </div>
         )}
 
         {tab === 'logs' && (

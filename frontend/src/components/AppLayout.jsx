@@ -57,17 +57,9 @@ export default function AppLayout() {
           {isAdmin && (
             <>
               <div className="em-mono-label" style={{ marginTop: 14, padding: '4px 12px' }}>Admin</div>
-              <NavLink to="/admin" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`} end>
+              <NavLink to="/admin" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
                 <Settings size={18} />
                 <span>Users & Settings</span>
-              </NavLink>
-              <NavLink to="/admin/hotels" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-                <Building size={18} />
-                <span>Hotels Ingestion</span>
-              </NavLink>
-              <NavLink to="/admin/knowledge" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-                <BookOpen size={18} />
-                <span>Knowledge Base</span>
               </NavLink>
             </>
           )}

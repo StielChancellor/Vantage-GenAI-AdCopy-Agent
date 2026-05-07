@@ -4,26 +4,31 @@
 /* ── Reset & Base ────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Unified palette (Editorial Mono) ─────────────────
+   The legacy --gold / --primary tokens are kept as aliases that now
+   resolve to the Editorial Mono red accent (#c8331e light, #e85a44 dark).
+   This means every legacy `var(--gold)` reference picks up the unified
+   color scheme without having to change hundreds of CSS rules. */
 :root,
 [data-theme="dark"] {
-  --bg: #0a0b10;
-  --bg-card: #12141d;
-  --bg-input: #1a1d2a;
-  --bg-hover: #1f2233;
-  --border: #262a3a;
-  --border-light: #353a50;
-  --text: #eceef4;
-  --text-dim: #7c819a;
-  --text-muted: #4e5268;
+  --bg: #0f0e0c;
+  --bg-card: #18161a;
+  --bg-input: #1d1a16;
+  --bg-hover: #221f1b;
+  --border: #2a2723;
+  --border-light: #3d3933;
+  --text: #f4f1ea;
+  --text-dim: #a8a399;
+  --text-muted: #6f6b62;
 
-  --gold: #c9a84c;
-  --gold-light: #e0c872;
-  --gold-dark: #a68b3a;
-  --gold-glow: rgba(201, 168, 76, 0.15);
-  --gold-glow-strong: rgba(201, 168, 76, 0.3);
+  --gold: #e85a44;
+  --gold-light: #f4b4a8;
+  --gold-dark: #c8331e;
+  --gold-glow: rgba(232, 90, 68, 0.14);
+  --gold-glow-strong: rgba(232, 90, 68, 0.28);
 
-  --primary: #c9a84c;
-  --primary-hover: #e0c872;
+  --primary: #e85a44;
+  --primary-hover: #c8331e;
   --danger: #e74c5a;
   --success: #3ecf8e;
   --warning: #f0b429;
@@ -32,44 +37,44 @@
   --radius: 10px;
   --radius-lg: 16px;
   --shadow-card: 0 4px 24px rgba(0,0,0,0.3), 0 1px 4px rgba(0,0,0,0.2);
-  --shadow-gold: 0 4px 20px rgba(201, 168, 76, 0.15);
+  --shadow-gold: 0 4px 20px rgba(232, 90, 68, 0.14);
 
-  --font-display: 'Playfair Display', Georgia, serif;
+  --font-display: 'Fraunces', 'Playfair Display', Georgia, serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 
-  --btn-primary-text: #0a0b10;
+  --btn-primary-text: #ffffff;
 }
 
 [data-theme="light"] {
-  --bg: #f5f5f7;
+  --bg: #f5f3ee;
   --bg-card: #ffffff;
-  --bg-input: #f0f0f5;
-  --bg-hover: #e8e8ee;
-  --border: #d4d4dc;
-  --border-light: #c0c0cc;
-  --text: #1a1a2e;
-  --text-dim: #5a5a72;
-  --text-muted: #8a8aa0;
+  --bg-input: #faf8f4;
+  --bg-hover: #ebe7df;
+  --border: #e2dfd7;
+  --border-light: #c8c3b8;
+  --text: #161513;
+  --text-dim: #595650;
+  --text-muted: #908c84;
 
-  --gold: #b8942e;
-  --gold-light: #c9a84c;
-  --gold-dark: #8a6e1a;
-  --gold-glow: rgba(184, 148, 46, 0.1);
-  --gold-glow-strong: rgba(184, 148, 46, 0.2);
+  --gold: #c8331e;
+  --gold-light: #c8331e;
+  --gold-dark: #7a1f10;
+  --gold-glow: #f6e3df;
+  --gold-glow-strong: rgba(200, 51, 30, 0.18);
 
-  --primary: #b8942e;
-  --primary-hover: #c9a84c;
-  --danger: #dc3545;
-  --success: #28a745;
-  --warning: #e6a817;
-  --info: #4a7fd9;
+  --primary: #c8331e;
+  --primary-hover: #7a1f10;
+  --danger: #c8331e;
+  --success: #2a7d4f;
+  --warning: #b8740b;
+  --info: #2f5fa0;
 
   --radius: 10px;
   --radius-lg: 16px;
-  --shadow-card: 0 2px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04);
-  --shadow-gold: 0 2px 12px rgba(184, 148, 46, 0.1);
+  --shadow-card: 0 1px 0 rgba(22,21,19,0.04), 0 12px 30px -12px rgba(22,21,19,0.10);
+  --shadow-gold: 0 2px 12px rgba(200, 51, 30, 0.10);
 
-  --font-display: 'Playfair Display', Georgia, serif;
+  --font-display: 'Fraunces', 'Playfair Display', Georgia, serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 
   --btn-primary-text: #ffffff;
@@ -180,14 +185,14 @@ label {
   text-decoration: none;
 }
 .btn-primary {
-  background: linear-gradient(135deg, var(--gold-dark), var(--gold), var(--gold-light));
-  background-size: 200% 200%;
+  background: var(--primary);
   color: var(--btn-primary-text);
-  box-shadow: var(--shadow-gold);
+  border-color: var(--primary);
+  box-shadow: 0 1px 0 rgba(22,21,19,0.04), 0 6px 14px -6px rgba(200, 51, 30, 0.32);
 }
 .btn-primary:hover {
-  background-position: 100% 0;
-  box-shadow: 0 6px 28px rgba(201, 168, 76, 0.3);
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
   transform: translateY(-1px);
 }
 .btn-primary:disabled {

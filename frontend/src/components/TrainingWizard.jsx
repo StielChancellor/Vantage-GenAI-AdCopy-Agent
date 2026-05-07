@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   startTraining, getTrainingProgress, answerTraining, getTrainingSessions,
-  getTrainingDirectives, deleteTrainingDirective, deleteTrainingSession,
-  exportTrainingSessions, searchKnowledgeBase,
+  deleteTrainingSession, exportTrainingSessions,
 } from '../services/api';
 import toast from 'react-hot-toast';
 import {
   Upload, CheckCircle, XCircle, MessageSquare, Trash2,
-  Download, Search, FileText, Type, FileSpreadsheet, Star,
-  Database, Clock, ChevronDown, ChevronUp,
+  Download, FileText, Type, FileSpreadsheet, Star,
 } from 'lucide-react';
 
 const SECTION_TYPES = [
@@ -50,14 +48,8 @@ export default function TrainingWizard() {
   const [progress, setProgress] = useState(null); // {percent, phase, message, status}
   const progressPollRef = useRef(null);
 
-  // History & Knowledge Base
+  // History
   const [sessions, setSessions] = useState([]);
-  const [activePanel, setActivePanel] = useState('sessions'); // sessions | directives | knowledge
-  const [directives, setDirectives] = useState([]);
-  const [kbQuery, setKbQuery] = useState('');
-  const [kbFilter, setKbFilter] = useState('');
-  const [kbResults, setKbResults] = useState([]);
-  const [expandedDirective, setExpandedDirective] = useState(null);
 
   useEffect(() => {
     loadSessions();
@@ -68,22 +60,6 @@ export default function TrainingWizard() {
       const res = await getTrainingSessions();
       setSessions(res.data || []);
     } catch {}
-  };
-
-  const loadDirectives = async () => {
-    try {
-      const res = await getTrainingDirectives();
-      setDirectives(res.data || []);
-    } catch {}
-  };
-
-  const handleSearchKB = async () => {
-    try {
-      const res = await searchKnowledgeBase(kbQuery, kbFilter);
-      setKbResults(res.data || []);
-    } catch {
-      toast.error('Search failed');
-    }
   };
 
   // Parse CSV headers client-side
@@ -264,17 +240,6 @@ export default function TrainingWizard() {
       toast.error(err.response?.data?.detail || 'Failed to submit answers');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleDeleteDirective = async (directiveId) => {
-    if (!window.confirm('Delete this training directive?')) return;
-    try {
-      await deleteTrainingDirective(directiveId);
-      toast.success('Directive deleted');
-      loadDirectives();
-    } catch {
-      toast.error('Failed to delete directive');
     }
   };
 
@@ -638,31 +603,9 @@ export default function TrainingWizard() {
         </div>
       )}
 
-      {/* Bottom Panels — Sessions / Directives / Knowledge Base */}
+      {/* Bottom Panel — Sessions only */}
       <div className="training-panels">
-        <div className="training-panel-tabs">
-          <button
-            className={`tab ${activePanel === 'sessions' ? 'active' : ''}`}
-            onClick={() => { setActivePanel('sessions'); loadSessions(); }}
-          >
-            <Clock size={14} /> Sessions
-          </button>
-          <button
-            className={`tab ${activePanel === 'directives' ? 'active' : ''}`}
-            onClick={() => { setActivePanel('directives'); loadDirectives(); }}
-          >
-            <Database size={14} /> Directives
-          </button>
-          <button
-            className={`tab ${activePanel === 'knowledge' ? 'active' : ''}`}
-            onClick={() => { setActivePanel('knowledge'); handleSearchKB(); }}
-          >
-            <Search size={14} /> Knowledge Base
-          </button>
-        </div>
-
-        {/* Sessions Panel */}
-        {activePanel === 'sessions' && (
+        {true && (
           <div className="training-history">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
               <h4 style={{ margin: 0 }}>Training Sessions</h4>
@@ -731,93 +674,6 @@ export default function TrainingWizard() {
           </div>
         )}
 
-        {/* Directives Panel */}
-        {activePanel === 'directives' && (
-          <div className="training-history">
-            <h4 style={{ marginBottom: '0.75rem' }}>Approved Directives</h4>
-            {directives.length === 0 ? (
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No approved directives yet.</p>
-            ) : (
-              <div className="directives-list">
-                {directives.map((d) => (
-                  <div key={d.id} className="directive-card">
-                    <div className="directive-header" onClick={() => setExpandedDirective(expandedDirective === d.id ? null : d.id)}>
-                      <div>
-                        <span className="badge badge-admin" style={{ marginRight: '0.5rem' }}>
-                          {SECTION_TYPES.find((t) => t.value === d.directive_type)?.label || d.directive_type}
-                        </span>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          {d.approved_at ? new Date(d.approved_at).toLocaleDateString() : ''}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <button className="btn-icon danger" onClick={(e) => { e.stopPropagation(); handleDeleteDirective(d.id); }}>
-                          <Trash2 size={14} />
-                        </button>
-                        {expandedDirective === d.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      </div>
-                    </div>
-                    {expandedDirective === d.id && (
-                      <pre className="training-preview-json" style={{ marginTop: '0.5rem' }}>
-                        {JSON.stringify(d.content, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Knowledge Base Panel */}
-        {activePanel === 'knowledge' && (
-          <div className="training-history knowledge-base">
-            <h4 style={{ marginBottom: '0.75rem' }}>Knowledge Base</h4>
-            <div className="kb-search-bar">
-              <input
-                value={kbQuery}
-                onChange={(e) => setKbQuery(e.target.value)}
-                placeholder="Search insights..."
-                onKeyDown={(e) => e.key === 'Enter' && handleSearchKB()}
-              />
-              <select value={kbFilter} onChange={(e) => { setKbFilter(e.target.value); }}>
-                <option value="">All Sections</option>
-                {SECTION_TYPES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-              <button className="btn btn-sm btn-primary" onClick={handleSearchKB}>
-                <Search size={14} /> Search
-              </button>
-            </div>
-
-            {kbResults.length === 0 ? (
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                No results. Try a different search term or select all sections.
-              </p>
-            ) : (
-              <div className="directives-list" style={{ marginTop: '0.75rem' }}>
-                {kbResults.map((d) => (
-                  <div key={d.id} className="directive-card">
-                    <div className="directive-header" onClick={() => setExpandedDirective(expandedDirective === d.id ? null : d.id)}>
-                      <div>
-                        <span className="badge badge-admin" style={{ marginRight: '0.5rem' }}>
-                          {SECTION_TYPES.find((t) => t.value === d.directive_type)?.label || d.directive_type}
-                        </span>
-                      </div>
-                      {expandedDirective === d.id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </div>
-                    {expandedDirective === d.id && (
-                      <pre className="training-preview-json" style={{ marginTop: '0.5rem' }}>
-                        {JSON.stringify(d.content, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

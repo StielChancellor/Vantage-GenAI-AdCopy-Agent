@@ -91,11 +91,27 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
     # Build a scope_summary from property_assignments so the frontend can chip it.
     from backend.app.routers.admin import _user_to_out
-    return _user_to_out(uid, data or {
+    fallback_data = {
         "full_name": current_user.get("name", ""),
         "email": current_user.get("sub", ""),
         "role": current_user.get("role", "user"),
-    })
+    }
+    try:
+        return _user_to_out(uid, data or fallback_data)
+    except Exception as exc:  # noqa: BLE001
+        # Never let scope-summary errors break /auth/me.
+        from backend.app.models.schemas import UserOut, ScopeSummary
+        d = data or fallback_data
+        return UserOut(
+            uid=uid,
+            full_name=d.get("full_name", ""),
+            email=d.get("email", ""),
+            role=d.get("role", "user"),
+            show_token_count=bool(d.get("show_token_count", False)),
+            show_token_amount=bool(d.get("show_token_amount", False)),
+            scope_summary=ScopeSummary(),
+            created_at=d.get("created_at"),
+        )
 
 
 @router.get("/auth/me/billing")
@@ -112,13 +128,28 @@ async def get_my_billing(current_user: dict = Depends(get_current_user)):
     rows = []
     total_tokens = 0
     total_cost = 0.0
-    for d in (
-        db.collection("audit_logs")
-        .where("user_email", "==", current_user.get("sub", ""))
-        .order_by("timestamp", direction="DESCENDING")
-        .limit(200)
-        .stream()
-    ):
+    # Try ordered query first (needs a composite index in production); fall back
+    # to unordered + in-memory sort if the index is missing.
+    try:
+        stream = (
+            db.collection("audit_logs")
+            .where("user_email", "==", current_user.get("sub", ""))
+            .order_by("timestamp", direction="DESCENDING")
+            .limit(200)
+            .stream()
+        )
+        docs = list(stream)
+    except Exception:  # noqa: BLE001
+        docs = list(
+            db.collection("audit_logs")
+            .where("user_email", "==", current_user.get("sub", ""))
+            .limit(500)
+            .stream()
+        )
+        docs.sort(key=lambda d: (d.to_dict() or {}).get("timestamp", ""), reverse=True)
+        docs = docs[:200]
+
+    for d in docs:
         data = d.to_dict() or {}
         if data.get("action") not in ("generate", "refine"):
             continue

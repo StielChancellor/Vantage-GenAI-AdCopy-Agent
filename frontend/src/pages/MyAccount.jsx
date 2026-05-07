@@ -12,20 +12,39 @@ export default function MyAccount() {
   const [me, setMe] = useState(null);
   const [billing, setBilling] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [errMsg, setErrMsg] = useState('');
   const [tab, setTab] = useState('profile');
 
   useEffect(() => {
     (async () => {
-      try {
-        const [meR, billR] = await Promise.all([api.get('/auth/me'), api.get('/auth/me/billing')]);
-        setMe(meR.data);
-        setBilling(billR.data);
-      } finally { setLoading(false); }
+      // Use allSettled so one failure doesn't kill the whole page.
+      const [meR, billR] = await Promise.allSettled([
+        api.get('/auth/me'),
+        api.get('/auth/me/billing'),
+      ]);
+      if (meR.status === 'fulfilled') {
+        setMe(meR.value.data);
+      } else {
+        setErrMsg(meR.reason?.response?.data?.detail || meR.reason?.message || 'Failed to load profile');
+      }
+      if (billR.status === 'fulfilled') {
+        setBilling(billR.value.data);
+      } else {
+        // Billing failure is non-fatal — show empty billing.
+        setBilling({ show_token_count: false, show_token_amount: false, total_tokens: null, total_cost_inr: null, rows: [] });
+      }
+      setLoading(false);
     })();
   }, []);
 
   if (loading) return <div className="em-card">Loading…</div>;
-  if (!me) return <div className="em-card">Could not load profile.</div>;
+  if (!me) return (
+    <div className="em-card">
+      <div className="em-mono-label">Profile</div>
+      <p style={{ marginTop: 6 }}>Could not load profile.</p>
+      {errMsg && <p style={{ fontSize: 12, color: 'var(--em-ink-soft)', marginTop: 4 }}>{errMsg}</p>}
+    </div>
+  );
 
   return (
     <div style={{ display: 'grid', gap: 18 }}>
