@@ -229,7 +229,7 @@ label {
   justify-content: center;
   min-height: 100vh;
   padding: 1rem;
-  background: radial-gradient(ellipse at 50% 0%, rgba(201,168,76,0.06) 0%, transparent 60%),
+  background: radial-gradient(ellipse at 50% 0%, rgba(200,51,30,0.06) 0%, transparent 60%),
               var(--bg);
 }
 .login-card {
@@ -449,7 +449,7 @@ label {
   gap: 0.3rem;
   padding: 0.25rem 0.55rem;
   background: var(--gold-glow);
-  border: 1px solid rgba(201, 168, 76, 0.25);
+  border: 1px solid rgba(200, 51, 30, 0.25);
   border-radius: 6px;
   font-size: 0.78rem;
   color: var(--gold-light);
@@ -624,7 +624,7 @@ label {
 .stat-badge.model {
   background: var(--gold-glow);
   color: var(--gold);
-  border: 1px solid rgba(201, 168, 76, 0.2);
+  border: 1px solid rgba(200, 51, 30, 0.2);
 }
 
 .platform-section {
@@ -749,7 +749,7 @@ label {
   padding: 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(201, 168, 76, 0.03);
+  background: rgba(200, 51, 30, 0.03);
 }
 .card-label {
   font-size: 0.72rem;
@@ -761,7 +761,7 @@ label {
 }
 .card-suggestion {
   border-left: 2px solid var(--gold);
-  background: rgba(201, 168, 76, 0.06);
+  background: rgba(200, 51, 30, 0.06);
   border-radius: 6px;
 }
 .card-suggestion .ad-index {
@@ -1244,7 +1244,7 @@ label {
   background: var(--gold);
   border-color: var(--gold);
   color: var(--bg);
-  box-shadow: 0 0 12px rgba(201, 168, 76, 0.3);
+  box-shadow: 0 0 12px rgba(200, 51, 30, 0.3);
 }
 .wizard-step.completed .wizard-step-circle {
   background: transparent;
@@ -2534,7 +2534,7 @@ label {
   padding: 0.3rem 0.75rem;
   border-radius: 999px;
   background: var(--gold-glow);
-  border: 1px solid rgba(201, 168, 76, 0.25);
+  border: 1px solid rgba(200, 51, 30, 0.25);
   color: var(--gold-light);
   font-size: 0.8rem;
   font-family: var(--font-body);
@@ -2543,7 +2543,7 @@ label {
   animation: tagPop 0.3s ease;
 }
 .copilot-suggestion-chip:hover {
-  background: rgba(201, 168, 76, 0.25);
+  background: rgba(200, 51, 30, 0.25);
   border-color: var(--gold);
 }
 
