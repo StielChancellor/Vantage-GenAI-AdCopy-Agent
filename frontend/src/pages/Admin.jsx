@@ -9,6 +9,7 @@ import {
 } from '../services/api';
 import toast from 'react-hot-toast';
 import TrainingWizard from '../components/TrainingWizard';
+import UserForm from '../components/admin/UserForm';
 import { Users, Activity, Trash2, Settings, Download, Brain } from 'lucide-react';
 
 export default function Admin() {
@@ -138,29 +139,28 @@ export default function Admin() {
 
         {tab === 'users' && (
           <div className="admin-panel">
-            <h3>Create User</h3>
-            <form onSubmit={handleCreateUser} className="inline-form">
-              <input placeholder="Full Name" value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} required />
-              <input placeholder="Email" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} required />
-              <input placeholder="Password" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} required minLength={8} />
-              <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
-              </select>
-              <button type="submit" className="btn btn-primary">Create</button>
-            </form>
+            <UserForm onSaved={() => { loadUsers(); }} />
 
-            <h3>Users</h3>
+            <h3 style={{ marginTop: 24 }}>Users</h3>
             <table className="data-table">
               <thead>
-                <tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th></th></tr>
+                <tr><th>Name</th><th>Email</th><th>Role</th><th>Scope</th><th>Visibility</th><th>Created</th><th></th></tr>
               </thead>
               <tbody>
                 {users.map((u) => (
                   <tr key={u.uid}>
                     <td>{u.full_name}</td>
                     <td>{u.email}</td>
-                    <td><span className={`badge badge-${u.role}`}>{u.role}</span></td>
+                    <td><span className={`badge badge-${u.role}`}>{(u.role || '').replace('_', ' ')}</span></td>
+                    <td style={{ fontSize: 12, color: 'var(--em-ink-soft, #595650)' }}>
+                      {u.scope_summary
+                        ? `${u.scope_summary.brand_count || 0}b · ${u.scope_summary.hotel_count || 0}h`
+                        : (u.role === 'admin' ? 'all' : '—')}
+                    </td>
+                    <td style={{ fontSize: 11 }}>
+                      {u.show_token_count ? '#' : '—'}{' '}
+                      {u.show_token_amount ? '₹' : '—'}
+                    </td>
                     <td>{u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</td>
                     <td>
                       <button className="btn-icon danger" onClick={() => handleDeleteUser(u.uid)}>

@@ -8,6 +8,10 @@ import Dashboard from './pages/Dashboard';
 import CRMWizard from './pages/CRMWizard';
 import Admin from './pages/Admin';
 import AppLayout from './components/AppLayout';
+import MyAccount from './pages/MyAccount';
+import HotelsIngestion from './pages/admin/HotelsIngestion';
+import KnowledgeBase from './pages/admin/KnowledgeBase';
+import './styles/editorial-mono.css';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -35,7 +39,10 @@ function AppRoutes() {
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
         <Route path="/adcopy" element={<Dashboard />} />
         <Route path="/crm" element={<CRMWizard />} />
+        <Route path="/account" element={<MyAccount />} />
         <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
+        <Route path="/admin/hotels" element={<RequireAdmin><HotelsIngestion /></RequireAdmin>} />
+        <Route path="/admin/knowledge" element={<RequireAdmin><KnowledgeBase /></RequireAdmin>} />
       </Route>
 
       {/* Backward compatibility redirect */}

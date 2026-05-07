@@ -1,0 +1,165 @@
+/* Editorial Mono — design tokens lifted from the v2.2 Claude Design handoff.
+   Charcoal + paper white + red accent. Intentionally minimal — applies on top
+   of the existing app stylesheet so we can migrate incrementally without
+   blowing up legacy components.
+*/
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --em-bg:        #f5f3ee;
+  --em-bg-2:      #ebe7df;
+  --em-surface:   #ffffff;
+  --em-surface-2: #faf8f4;
+  --em-ink:       #161513;
+  --em-ink-2:     #2a2825;
+  --em-ink-soft:  #595650;
+  --em-ink-faint: #908c84;
+  --em-line:      #e2dfd7;
+  --em-line-strong: #c8c3b8;
+  --em-accent:    #c8331e;
+  --em-accent-soft:#f6e3df;
+  --em-accent-ink: #7a1f10;
+  --em-shadow-card: 0 1px 0 rgba(22,21,19,0.04), 0 12px 30px -12px rgba(22,21,19,0.10);
+  --em-shadow-elev: 0 1px 0 rgba(22,21,19,0.04), 0 24px 60px -20px rgba(22,21,19,0.18);
+}
+
+/* Component-scoped utility classes — opt in by adding `em-*` to existing components. */
+
+.em-display {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+.em-display em { font-style: italic; color: var(--em-accent); font-weight: 400; }
+
+.em-mono-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--em-ink-faint);
+}
+
+.em-card {
+  background: var(--em-surface);
+  border: 1px solid var(--em-line);
+  border-radius: 14px;
+  box-shadow: var(--em-shadow-card);
+  padding: 22px;
+}
+
+.em-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--em-surface-2);
+  border: 1px solid var(--em-line);
+  font-size: 12px; color: var(--em-ink-2);
+  line-height: 1.4;
+}
+.em-pill.accent { background: var(--em-accent-soft); border-color: var(--em-accent-soft); color: var(--em-accent-ink); }
+.em-pill.muted { color: var(--em-ink-soft); }
+
+.em-mode-card {
+  padding: 14px; border: 1px solid var(--em-line); border-radius: 10px;
+  background: var(--em-surface-2);
+  cursor: pointer;
+  transition: all .15s;
+  text-align: left;
+}
+.em-mode-card:hover { border-color: var(--em-line-strong); }
+.em-mode-card[aria-selected="true"] {
+  border-color: var(--em-accent);
+  background: var(--em-accent-soft);
+}
+.em-mode-card .t { font-weight: 600; font-size: 13.5px; }
+.em-mode-card .s { font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+  color: var(--em-ink-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
+
+.em-tree {
+  font-size: 13.5px;
+}
+.em-tree .em-tree-node {
+  border: 1px solid var(--em-line);
+  border-radius: 12px;
+  background: var(--em-surface);
+  margin-bottom: 10px;
+  padding: 14px 16px;
+}
+.em-tree .em-tree-node.brand { border-left: 4px solid var(--em-accent); }
+.em-tree .em-tree-children { margin-top: 10px; padding-left: 18px; border-left: 1px dashed var(--em-line-strong); }
+.em-tree .em-tree-title { font-weight: 600; font-size: 14px; }
+.em-tree .em-tree-meta { color: var(--em-ink-soft); font-size: 12px; margin-top: 2px; }
+
+.em-version-footer {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--em-ink-faint);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-top: 1px solid var(--em-line);
+  margin-top: auto;
+}
+
+/* Searchable property switcher (PropertySwitcher.jsx) */
+.em-switcher { position: relative; }
+.em-switcher input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--em-line);
+  border-radius: 8px;
+  background: var(--em-surface);
+  font: inherit; font-size: 13.5px;
+}
+.em-switcher input:focus { outline: none; border-color: var(--em-accent); }
+.em-switcher .em-switcher-results {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--em-surface);
+  border: 1px solid var(--em-line-strong);
+  border-radius: 10px;
+  box-shadow: var(--em-shadow-elev);
+  max-height: 320px; overflow-y: auto;
+  z-index: 50;
+}
+.em-switcher-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--em-line);
+}
+.em-switcher-row:last-child { border-bottom: none; }
+.em-switcher-row:hover { background: var(--em-surface-2); }
+.em-switcher-row .em-brand-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--em-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.em-switcher-row .em-hotel-name { font-weight: 500; color: var(--em-ink); }
+.em-switcher-row .em-type-badge {
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--em-ink-soft);
+  border: 1px solid var(--em-line);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.em-switcher-row.brand .em-type-badge { color: var(--em-accent); border-color: var(--em-accent-soft); background: var(--em-accent-soft); }
+
+/* Selected-chip pair for the cascade UX */
+.em-selection-chips { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.em-selection-chips .em-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 12px;
+}
+.em-selection-chips .em-chip.brand-half { background: var(--em-accent-soft); color: var(--em-accent-ink);
+  opacity: 0.55; border: 1px dashed var(--em-accent); }
+.em-selection-chips .em-chip.brand-full { background: var(--em-accent); color: #fff; }
+.em-selection-chips .em-chip.hotel-full { background: var(--em-ink); color: #fff; }
+
+/* token-redaction visual */
+.em-redacted { color: var(--em-ink-faint); font-style: italic; }
