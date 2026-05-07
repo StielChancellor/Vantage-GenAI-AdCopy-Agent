@@ -35,7 +35,7 @@ export default function Login() {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <Zap size={32} style={{ color: '#c9a84c', marginBottom: '0.5rem' }} />
+          <Zap size={32} style={{ color: 'var(--primary)', marginBottom: '0.5rem' }} />
           <h1>Vantage GenAI</h1>
           <div className="login-divider" />
           <p>Ad Copy Agent</p>
