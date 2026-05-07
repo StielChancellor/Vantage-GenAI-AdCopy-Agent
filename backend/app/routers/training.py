@@ -32,7 +32,7 @@ router = APIRouter(prefix="/training", tags=["training"])
 
 # Section types that bypass the AI summarization flow and run the v2.1
 # deterministic ingestion pipeline (adapter → score → embed → BQ).
-_ADAPTER_SECTION_TYPES = {"google_ads_export", "moengage_push"}
+_ADAPTER_SECTION_TYPES = {"google_ads_export", "moengage_push", "brand_usp_csv"}
 
 
 def _read_csv_robust(contents: bytes) -> pd.DataFrame:
@@ -191,7 +191,9 @@ async def _run_v21_ingestion(
     time_seconds, input_tokens, model_used, created_at) so the run shows
     up cleanly in the existing Sessions UI."""
     from backend.app.services.ingestion.csv_validator import validate_csv
-    from backend.app.services.ingestion.adapters import parse_google_ads, parse_moengage
+    from backend.app.services.ingestion.adapters import (
+        parse_google_ads, parse_moengage, parse_brand_usp,
+    )
     from backend.app.services.analytics.quality_scorer import (
         score_records, quality_report_from_records,
     )
@@ -212,10 +214,18 @@ async def _run_v21_ingestion(
         raise HTTPException(400, f"Validation failed: {report.rejection_reason}")
 
     _update_progress(training_run_id, "parsing", 15, f"Parsing {section_type} schema...", total=len(df))
+    parse_warnings: list[str] = []
     if section_type == "google_ads_export":
         records = parse_google_ads(df)
-    else:
+    elif section_type == "moengage_push":
         records = parse_moengage(df)
+    elif section_type == "brand_usp_csv":
+        records, brand_usp_errors = parse_brand_usp(df)
+        parse_warnings.extend(brand_usp_errors)
+        if brand_usp_errors:
+            logger.info("brand_usp_csv had %d row-level errors", len(brand_usp_errors))
+    else:
+        records = []
 
     if not records:
         elapsed = round(time.time() - start_time, 2)

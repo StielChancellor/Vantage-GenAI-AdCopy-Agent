@@ -1,11 +1,14 @@
 """Ad copy generation using Gemini with pre-processed insights, brand guardrails, and platform optimization."""
 import json
+import logging
 import time
+import uuid
 from datetime import datetime, timezone
 
 from backend.app.core.vertex_client import get_generative_model, extract_token_counts, calculate_cost_inr
 from backend.app.core.config import get_settings
 from backend.app.core.database import get_firestore
+from backend.app.core.version import APP_VERSION
 from backend.app.services.rag_engine import retrieve_ad_insights, get_brand_usps
 from backend.app.services.training_engine import get_training_directives
 from backend.app.services.scraper import scrape_hotel_page
@@ -16,6 +19,8 @@ from backend.app.models.schemas import (
     AdGenerationRequest, AdGenerationResponse, AdCopyOutput,
     AdRefinementRequest,
 )
+
+logger = logging.getLogger("vantage.ad_generator")
 
 settings = get_settings()
 
@@ -111,14 +116,51 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     # Get admin-configured model (resolved via vertex_client)
     model_name = _get_admin_model()
 
-    # 1. Gather context
-    # v2.1: type-aware retrieval — pulls exemplars matching the requested
-    # platform (mapped to campaign_type) and the flight date's season.
+    # v2.2: every generation gets a unique ID for cross-system tracing.
+    generation_id = str(uuid.uuid4())
+    logger.info(
+        "ad_generation_start",
+        extra={"json_fields": {
+            "generation_id": generation_id,
+            "app_version": APP_VERSION,
+            "hotel_name": request.hotel_name,
+            "platforms": request.platforms,
+        }},
+    )
+
+    # 1. Gather context — scope-aware (v2.2)
+    # If frontend sent a structured selection, honor it; otherwise fall back to legacy hotel_name string.
+    selection = getattr(request, "selection", None)
+    scope = "hotel"
+    selected_hotel_id = None
+    selected_brand_id = None
+    hotel_record: dict | None = None
+    if selection:
+        scope = getattr(selection, "scope", "hotel") or "hotel"
+        selected_hotel_id = getattr(selection, "hotel_id", None)
+        selected_brand_id = getattr(selection, "brand_id", None)
+
+    # Pull the hotel record from the catalog if we have an ID — gives us
+    # rooms_count, fnb_count, gmb_url etc. without an extra HTTP fetch.
+    if selected_hotel_id:
+        try:
+            from backend.app.services.hotels import catalog as _hotel_catalog
+            hotel_record = _hotel_catalog.get_hotel(selected_hotel_id)
+            if hotel_record and not selected_brand_id:
+                selected_brand_id = hotel_record.get("brand_id")
+        except Exception as exc:
+            logger.warning("hotel catalog lookup failed", extra={"json_fields": {"generation_id": generation_id, "exc": str(exc)[:200]}})
+
     primary_ct = _primary_campaign_type(getattr(request, "platforms", []))
     ad_insights = await retrieve_ad_insights(
         request.hotel_name,
         campaign_type=primary_ct,
         flight_date=getattr(request, "flight_date", None),
+        scope=scope,
+        brand_id=selected_brand_id,
+        hotel_id=selected_hotel_id,
+        hotel_name_for_anonymize=(hotel_record or {}).get("hotel_name") or request.hotel_name,
+        city_for_anonymize=None,
     )
 
     # Brand USPs & guardrails (semantic RAG)
@@ -150,22 +192,47 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         "urls_scraped": len(scraped_contents),
     }
 
-    # Google Reviews insights (support multiple listing URLs)
-    review_data = {}
-    listing_urls = request.google_listing_urls or (
-        [request.google_listing_url] if request.google_listing_url and request.google_listing_url.strip() else []
-    )
-    for listing_url in listing_urls:
-        if not listing_url or not listing_url.strip():
-            continue
-        try:
-            rd = await fetch_google_reviews(listing_url, request.hotel_name)
-            if not review_data or rd.get("review_count", 0) > review_data.get("review_count", 0):
-                review_data = rd  # Keep the richest review data
-        except Exception:
-            pass
-    if not review_data and listing_urls:
-        review_data = {"insights": "No review data available.", "review_count": 0}
+    # Google Reviews insights — v2.2: skip entirely for brand-scope generations
+    # (the user's "do not show GMB review to the frontend user when a brand is
+    # selected" rule — both fetch + injection are skipped).
+    review_data: dict = {}
+    if scope != "brand":
+        listing_urls = request.google_listing_urls or (
+            [request.google_listing_url] if request.google_listing_url and request.google_listing_url.strip() else []
+        )
+        # If we have a hotel record from the catalog, use its gmb_url as a default
+        if hotel_record and not listing_urls and hotel_record.get("gmb_url"):
+            listing_urls = [hotel_record["gmb_url"]]
+        for listing_url in listing_urls:
+            if not listing_url or not listing_url.strip():
+                continue
+            try:
+                rd = await fetch_google_reviews(listing_url, request.hotel_name)
+                if not review_data or rd.get("review_count", 0) > review_data.get("review_count", 0):
+                    review_data = rd
+            except Exception as exc:
+                logger.warning("review fetch failed", extra={"json_fields": {"generation_id": generation_id, "url": listing_url[:80], "exc": str(exc)[:160]}})
+        if not review_data and listing_urls:
+            review_data = {"insights": "No review data available.", "review_count": 0}
+
+    # Property attributes — what the model SHOULD know about the property
+    # (rooms_count, fnb_count). Hotel_code and brand_name are NOT injected.
+    property_attrs_block = ""
+    if scope == "hotel" and hotel_record:
+        bits = []
+        rc = hotel_record.get("rooms_count")
+        fc = hotel_record.get("fnb_count")
+        if rc:
+            bits.append(f"{rc}-room property")
+        if fc:
+            bits.append(f"{fc} F&B outlet{'s' if fc != 1 else ''}")
+        if hotel_record.get("website_url"):
+            bits.append(f"official site: {hotel_record['website_url']}")
+        if bits:
+            property_attrs_block = (
+                "\n\n## PROPERTY ATTRIBUTES (use naturally where it strengthens copy):\n- "
+                + "\n- ".join(bits)
+            )
 
     # 2. Build the system prompt with guardrails
     system_prompt = _build_system_prompt(brand_data)
@@ -183,10 +250,29 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         training_directives=training_directives,
         seasonal_context=seasonal_context,
     )
+    # v2.2: append the deterministic property-attributes block. Doing it here
+    # rather than threading another arg through _build_user_prompt keeps the
+    # latter's signature stable for any other callers.
+    if property_attrs_block:
+        user_prompt = user_prompt + property_attrs_block
 
     # 4. Call Gemini via Vertex AI
-    model = get_generative_model(model_name, system_instruction=system_prompt)
-    response = model.generate_content(user_prompt)
+    try:
+        model = get_generative_model(model_name, system_instruction=system_prompt)
+        response = model.generate_content(user_prompt)
+    except Exception as exc:
+        logger.error(
+            "gemini_call_failed",
+            extra={"json_fields": {
+                "generation_id": generation_id,
+                "stage": "gemini.generate_content",
+                "exc_type": type(exc).__name__,
+                "exc": str(exc)[:500],
+                "model": model_name,
+            }},
+            exc_info=True,
+        )
+        raise
 
     # 4b. Safety filter
     filter_result = check_response(
@@ -195,6 +281,13 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         request_type="ad_copy",
     )
     if not filter_result.passed:
+        logger.warning(
+            "safety_block",
+            extra={"json_fields": {
+                "generation_id": generation_id,
+                "harm_category": filter_result.harm_category,
+            }},
+        )
         raise ValueError(f"Generated content blocked by safety filter: {filter_result.harm_category}")
 
     # 5. Parse response and calculate tokens
@@ -219,7 +312,45 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         model_used=model_name,
         time_seconds=elapsed,
         generated_at=datetime.now(timezone.utc).isoformat(),
+        generation_id=generation_id,
+        app_version=APP_VERSION,
     )
+
+    logger.info(
+        "ad_generation_complete",
+        extra={"json_fields": {
+            "generation_id": generation_id,
+            "app_version": APP_VERSION,
+            "scope": scope,
+            "brand_id": selected_brand_id,
+            "hotel_id": selected_hotel_id,
+            "platforms": request.platforms,
+            "tokens_used": tokens_used,
+            "time_seconds": elapsed,
+        }},
+    )
+
+    # v2.2: stream to BigQuery generation_audit (best-effort).
+    try:
+        from backend.app.services.analytics import audit_logger
+        await audit_logger.log_generation(
+            brand_id=str(selected_brand_id or request.hotel_name),
+            user_id="",   # set by router (it knows the JWT subject)
+            platform=",".join(request.platforms or []),
+            model=model_name,
+            tokens_in=input_tokens,
+            tokens_out=output_tokens,
+            latency_ms=int(elapsed * 1000),
+            ad_content=" | ".join(v.headlines[0] if v.headlines else "" for v in variants),
+            generation_id=generation_id,
+            app_version=APP_VERSION,
+            scope=scope,
+            hotel_id=selected_hotel_id or "",
+            request_type="ad_copy",
+            status="ok",
+        )
+    except Exception as exc:
+        logger.debug("audit_logger.log_generation failed (non-fatal): %s", exc)
 
     # Cache result for repeat briefs
     try:

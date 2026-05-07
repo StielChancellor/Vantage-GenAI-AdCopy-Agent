@@ -78,9 +78,70 @@ async def logout(current_user: dict = Depends(get_current_user)):
 
 @router.get("/auth/me", response_model=UserOut)
 async def get_me(current_user: dict = Depends(get_current_user)):
-    return UserOut(
-        uid=current_user["uid"],
-        full_name=current_user["name"],
-        email=current_user["sub"],
-        role=current_user["role"],
-    )
+    """Hydrate the JWT into a full UserOut by reading the live Firestore doc.
+    The JWT carries minimal data (sub, uid, role); show_token_count, show_token_amount,
+    and scope_summary live on the user doc and are needed by My Account."""
+    db = get_firestore()
+    uid = current_user.get("uid", "")
+    data = {}
+    if uid:
+        d = db.collection("users").document(uid).get()
+        if d.exists:
+            data = d.to_dict() or {}
+
+    # Build a scope_summary from property_assignments so the frontend can chip it.
+    from backend.app.routers.admin import _user_to_out
+    return _user_to_out(uid, data or {
+        "full_name": current_user.get("name", ""),
+        "email": current_user.get("sub", ""),
+        "role": current_user.get("role", "user"),
+    })
+
+
+@router.get("/auth/me/billing")
+async def get_my_billing(current_user: dict = Depends(get_current_user)):
+    """Per-user billing summary, gated by show_token_count/show_token_amount.
+    Returns redacted "—" markers for users whose admin disabled visibility."""
+    db = get_firestore()
+    uid = current_user.get("uid", "")
+    user_doc = db.collection("users").document(uid).get() if uid else None
+    user_data = (user_doc.to_dict() or {}) if (user_doc and user_doc.exists) else {}
+    show_count = bool(user_data.get("show_token_count", False))
+    show_amount = bool(user_data.get("show_token_amount", False))
+
+    rows = []
+    total_tokens = 0
+    total_cost = 0.0
+    for d in (
+        db.collection("audit_logs")
+        .where("user_email", "==", current_user.get("sub", ""))
+        .order_by("timestamp", direction="DESCENDING")
+        .limit(200)
+        .stream()
+    ):
+        data = d.to_dict() or {}
+        if data.get("action") not in ("generate", "refine"):
+            continue
+        tokens = int(data.get("tokens_consumed", 0))
+        cost = float(data.get("cost_inr", 0))
+        total_tokens += tokens
+        total_cost += cost
+        rows.append({
+            "id": d.id,
+            "timestamp": data.get("timestamp", ""),
+            "hotel_name": data.get("hotel_name", ""),
+            "offer_name": data.get("offer_name", ""),
+            "platforms": data.get("platforms", []),
+            "tokens": tokens if show_count else None,
+            "cost_inr": round(cost, 4) if show_amount else None,
+            "model_used": data.get("model_used", ""),
+            "generation_id": data.get("generation_id", ""),
+        })
+
+    return {
+        "show_token_count": show_count,
+        "show_token_amount": show_amount,
+        "total_tokens": total_tokens if show_count else None,
+        "total_cost_inr": round(total_cost, 4) if show_amount else None,
+        "rows": rows,
+    }

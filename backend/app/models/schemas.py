@@ -1,14 +1,55 @@
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Literal
 from datetime import datetime
 
 
-# ── Auth ──────────────────────────────────────────────
+# ── Auth & RBAC (v2.2 — 5-tier hierarchy) ────────────
+ROLES = (
+    "admin",                    # everything
+    "brand_manager",            # brand + all hotels under brand
+    "area_manager",             # multiple hotels (no brand-level)
+    "hotel_marketing_manager",  # exactly one hotel
+    "agency",                   # brands + multiple hotels
+    "user",                     # legacy (still accepted, treated as area_manager-equivalent for backward compat)
+)
+
+
+class ScopeAssignment(BaseModel):
+    """One row of access granted to a user. Either brand-scope OR hotel-scope, not both."""
+    scope: Literal["brand", "hotel"]
+    brand_id: Optional[str] = None
+    hotel_id: Optional[str] = None
+
+    @field_validator("hotel_id")
+    @classmethod
+    def _exactly_one(cls, v, info):
+        # When scope is 'hotel', hotel_id required; for 'brand', brand_id is required (checked at the model level by the API).
+        return v
+
+
+class ScopeSummary(BaseModel):
+    """Denormalized summary for fast UI listing: '3 brands · 14 hotels'."""
+    brand_count: int = 0
+    hotel_count: int = 0
+    brand_names: list[str] = []      # first 3 for chip display
+    hotel_names: list[str] = []      # first 3 for chip display
+
+
 class UserCreate(BaseModel):
     full_name: str
     email: str
     password: str = Field(min_length=8)
-    role: str = "user"  # "user" | "admin"
+    role: str = "user"
+    show_token_count: bool = False
+    show_token_amount: bool = False
+    assignments: list[ScopeAssignment] = []   # admin-only roles ignore this
+
+    @field_validator("role")
+    @classmethod
+    def _valid_role(cls, v):
+        if v not in ROLES:
+            raise ValueError(f"role must be one of {ROLES}")
+        return v
 
 
 class UserLogin(BaseModel):
@@ -21,6 +62,9 @@ class UserOut(BaseModel):
     full_name: str
     email: str
     role: str
+    show_token_count: bool = False
+    show_token_amount: bool = False
+    scope_summary: Optional[ScopeSummary] = None
     created_at: Optional[str] = None
 
 
@@ -38,10 +82,71 @@ class ContextSelector(BaseModel):
     generation_mode: Optional[str] = None  # "unified" | "per_property" (multi/hq only)
 
 
+# ── v2.2 Property Selection (PropertySwitcher output) ─
+class PropertySelection(BaseModel):
+    """Structured output of the cascading PropertySwitcher.
+
+    scope='hotel' → single hotel ad; brand_id is denormed for retrieval filtering.
+    scope='brand' → brand-level ad; backend pulls anonymized hotel exemplars.
+    scope='multi' → set of hotels (area_manager / agency); generation_mode controls fan-out.
+    """
+    scope: Literal["hotel", "brand", "multi"] = "hotel"
+    hotel_id: Optional[str] = None
+    brand_id: Optional[str] = None
+    hotel_ids: list[str] = []
+    generation_mode: Optional[str] = None   # 'unified' | 'per_hotel' for multi-scope
+
+
+# ── Hotel & Brand catalog (v2.2) ─────────────────────
+class HotelIngestRow(BaseModel):
+    """One row of the hotels-ingestion CSV (admin-only)."""
+    hotel_name: str
+    hotel_code: str           # unique business key — never sent to the model
+    brand_name: str           # used for hierarchy + permissions, never sent to the model
+    rooms_count: Optional[int] = None    # SENT to the model so it can write '200-room property'
+    fnb_count: Optional[int] = None      # SENT — '3 F&B outlets'
+    website_url: Optional[str] = ""
+    gmb_url: Optional[str] = ""
+
+
+class HotelOut(BaseModel):
+    hotel_id: str
+    hotel_name: str
+    hotel_code: str
+    brand_id: str
+    brand_name: str
+    rooms_count: Optional[int] = None
+    fnb_count: Optional[int] = None
+    website_url: Optional[str] = ""
+    gmb_url: Optional[str] = ""
+    gmb_place_id: Optional[str] = ""
+    status: str = "active"
+    last_enriched_at: Optional[str] = None
+
+
+class BrandOut(BaseModel):
+    brand_id: str
+    brand_name: str
+    slug: str
+    hotel_count: int = 0
+    voice: Optional[str] = ""
+    created_at: Optional[str] = None
+
+
+class HotelIngestResponse(BaseModel):
+    created_brands: int
+    created_hotels: int
+    updated_hotels: int
+    skipped: int = 0
+    errors: list[str] = []
+    brand_tree: list[dict] = []   # [{brand_name, hotels:[{hotel_name, hotel_code}]}]
+
+
 # ── Ad Generation ────────────────────────────────────
 class AdGenerationRequest(BaseModel):
-    context: Optional[ContextSelector] = None
-    hotel_name: str = ""  # Backward compat — derived from context
+    context: Optional[ContextSelector] = None         # legacy — kept for backward compat
+    selection: Optional[PropertySelection] = None     # v2.2 — preferred
+    hotel_name: str = ""                              # backward compat — derived from selection/context
     offer_name: str
     inclusions: str
     reference_urls: list[str]
@@ -52,6 +157,7 @@ class AdGenerationRequest(BaseModel):
     platforms: list[str] = ["google_search"]
     carousel_mode: Optional[str] = "suggest"
     carousel_cards: Optional[list[str]] = None
+    flight_date: Optional[str] = ""
 
 
 class AdCopyOutput(BaseModel):
@@ -71,6 +177,8 @@ class AdGenerationResponse(BaseModel):
     model_used: str
     time_seconds: float
     generated_at: str
+    generation_id: Optional[str] = None    # v2.2 — UUID for cross-system trace
+    app_version: Optional[str] = None      # v2.2 — server version that produced this
 
 
 # ── Ad Refinement ───────────────────────────────────

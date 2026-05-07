@@ -23,13 +23,21 @@ async def retrieve_ad_insights(
     campaign_type: str | None = None,
     season: str | None = None,
     flight_date=None,
+    scope: str = "hotel",
+    brand_id: str | None = None,
+    hotel_id: str | None = None,
+    hotel_name_for_anonymize: str | None = None,
+    city_for_anonymize: str | None = None,
 ) -> dict:
-    """Retrieve semantically relevant ad performance insights for a hotel.
+    """Retrieve semantically relevant ad performance insights.
 
-    v2.1: campaign_type and season filter the vector search so that a Demand
-    Gen video request only retrieves Demand Gen video exemplars from matching
-    seasons. Falls through to Firestore keyword search if Vector Search is
-    unavailable.
+    v2.2 adds **scope** awareness so brand-level generations don't leak hotel-
+    specific identity into the prompt:
+
+    - scope='hotel'  → existing v2.1 behavior; no anonymization.
+    - scope='brand'  → pull anonymized hotel exemplars (strip property names,
+       cities) so the model learns generic patterns under the brand's voice
+       without parroting individual hotel facts.
     """
     query = query_context or f"Best performing ad headlines and descriptions for {hotel_name}"
 
@@ -51,27 +59,87 @@ async def retrieve_ad_insights(
         except Exception:
             pass
 
+    # Brand id used as the vector restrict — fall back to the hotel_name string
+    # for backwards compatibility.
+    vector_brand_id = brand_id or hotel_name
+
     passages = await _semantic_retrieve(
         query,
-        brand_id=hotel_name,
-        section_type=None,                  # search across both google_ads_export and moengage_push
+        brand_id=vector_brand_id,
+        section_type=None,
         campaign_type=campaign_type,
         season=season,
-        min_impression_bucket="mid",        # exclude low-volume noise
+        min_impression_bucket="mid",
     )
 
-    # If type-filtered search returned nothing, retry without the season constraint
-    # (a brand might not have winter Demand Gen video exemplars yet).
     if not passages and (campaign_type or season):
         passages = await _semantic_retrieve(
-            query, brand_id=hotel_name, campaign_type=campaign_type,
+            query, brand_id=vector_brand_id, campaign_type=campaign_type,
             min_impression_bucket="mid",
         )
 
+    # v2.2 anonymization: when scope='brand', sanitize hotel-specific tokens.
+    if scope == "brand" and passages:
+        hotel_tokens = []
+        if hotel_name_for_anonymize:
+            hotel_tokens.append(hotel_name_for_anonymize)
+        if city_for_anonymize:
+            hotel_tokens.append(city_for_anonymize)
+        # Also strip per-passage hotel/brand names found in metadata
+        passages = [_anonymize_passage(p, extra_terms=hotel_tokens) for p in passages]
+
     if passages:
-        return _format_passages_as_insights(passages, campaign_type=campaign_type, season=season)
+        return _format_passages_as_insights(
+            passages, campaign_type=campaign_type, season=season, scope=scope,
+        )
 
     return _firestore_fallback_insights(hotel_name)
+
+
+_AMENITY_RE = None
+def _get_amenity_re():
+    """Lazy compile — strip phrases that wrap a hotel-specific noun in possessive form,
+    e.g. "ITC Maurya's spa" → "the spa", "Mumbai's largest pool" → "the largest pool"."""
+    global _AMENITY_RE
+    if _AMENITY_RE is None:
+        import re
+        _AMENITY_RE = re.compile(r"\b([A-Z][\w]*(?:\s+[A-Z][\w]*)*)['’]s\b")
+    return _AMENITY_RE
+
+
+def _anonymize_passage(passage: dict, extra_terms: list[str] | None = None) -> dict:
+    """Strip hotel-specific identity tokens from a passage so brand-level
+    generations don't leak property names. Operates on a SHALLOW COPY so the
+    Firestore-cached source isn't mutated."""
+    import re
+
+    p = dict(passage)
+    text = (p.get("headline") or "") + " || " + (p.get("description") or "")
+
+    # 1. Remove brand+property names from the passage's own metadata
+    for tok in [p.get("hotel_name"), p.get("business_name")]:
+        if tok and isinstance(tok, str) and len(tok) > 2:
+            text = re.sub(re.escape(tok), "the property", text, flags=re.IGNORECASE)
+
+    # 2. Caller-supplied extras (typically the active selection's hotel + city)
+    for tok in extra_terms or []:
+        if tok and isinstance(tok, str) and len(tok) > 2:
+            text = re.sub(re.escape(tok), "the property", text, flags=re.IGNORECASE)
+
+    # 3. Generic possessive replacement: "Mumbai's pool" → "the pool"
+    text = _get_amenity_re().sub("the", text)
+
+    # Split back
+    if " || " in text:
+        h, _, d = text.partition(" || ")
+    else:
+        h, d = text, ""
+    p["headline"] = h.strip()
+    p["description"] = d.strip()
+    p["_anonymized"] = True
+    # Drop identity metadata so downstream formatter doesn't surface it
+    p.pop("hotel_name", None)
+    return p
 
 
 async def get_brand_usps(hotel_name: str) -> dict | None:
@@ -234,6 +302,7 @@ def _format_passages_as_insights(
     passages: list[dict],
     campaign_type: str | None = None,
     season: str | None = None,
+    scope: str = "hotel",
 ) -> dict:
     """Format semantic search results for ad_generator consumption.
     v2.1 returns rich, typed exemplars instead of raw concatenated text so
@@ -283,7 +352,9 @@ def _format_passages_as_insights(
         "patterns": [],
         "exemplars": exemplars,
         "source": "vector_search",
+        "scope": scope,
         "scope_campaign_type": campaign_type,
         "scope_season": season,
         "total_ads_analyzed": len(passages),
+        "anonymized": scope == "brand",
     }

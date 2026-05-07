@@ -41,7 +41,7 @@ _HOSPITALITY_COLUMNS: dict[str, list[str]] = {
 
 # Adapter-driven section types (these skip column normalization — adapters
 # read original column names with capitalisation, spaces, parens preserved).
-ADAPTER_SECTION_TYPES = {"google_ads_export", "moengage_push"}
+ADAPTER_SECTION_TYPES = {"google_ads_export", "moengage_push", "brand_usp_csv"}
 
 NULL_THRESHOLD = 0.20
 
@@ -95,6 +95,7 @@ def validate_csv(df: pd.DataFrame, section_type: str) -> ValidationReport:
         from backend.app.services.ingestion.adapters import (
             detect_google_ads,
             detect_moengage,
+            detect_brand_usp,
         )
         if section_type == "google_ads_export":
             if not detect_google_ads(df):
@@ -114,6 +115,15 @@ def validate_csv(df: pd.DataFrame, section_type: str) -> ValidationReport:
                 )
                 return report
             report.detected_format = "moengage_push"
+        elif section_type == "brand_usp_csv":
+            if not detect_brand_usp(df):
+                report.passed = False
+                report.rejection_reason = (
+                    "Does not look like a Brand/Hotel USP CSV. "
+                    "Required columns: brand_name, usps (hotel_name optional)."
+                )
+                return report
+            report.detected_format = "brand_usp_csv"
 
         report.valid_rows = report.total_rows
         report.passed = True

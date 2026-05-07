@@ -9,8 +9,12 @@ from fastapi.responses import FileResponse
 from backend.app.core.config import get_settings
 from backend.app.core.observability import setup_observability
 from backend.app.core.vertex_client import _ensure_init as init_vertex_ai
+from backend.app.core.version import APP_VERSION
 from backend.app.middleware.request_logger import RequestLoggingMiddleware
-from backend.app.routers import auth, admin, generate, health, places, training, events, crm, copilot
+from backend.app.routers import (
+    auth, admin, generate, health, places, training, events, crm, copilot,
+    hotels, knowledge,
+)
 
 settings = get_settings()
 
@@ -22,7 +26,7 @@ init_vertex_ai()
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="2.0.0",
+    version=APP_VERSION,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
 )
@@ -41,6 +45,8 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(health.router, tags=["Health"])
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX, tags=["Auth"])
 app.include_router(admin.router, prefix=settings.API_V1_PREFIX, tags=["Admin"])
+app.include_router(hotels.router, prefix=settings.API_V1_PREFIX, tags=["Hotels"])
+app.include_router(knowledge.router, prefix=settings.API_V1_PREFIX, tags=["Knowledge"])
 app.include_router(generate.router, prefix=settings.API_V1_PREFIX, tags=["Generate"])
 app.include_router(places.router, prefix=settings.API_V1_PREFIX, tags=["Places"])
 app.include_router(training.router, prefix=settings.API_V1_PREFIX, tags=["Training"])

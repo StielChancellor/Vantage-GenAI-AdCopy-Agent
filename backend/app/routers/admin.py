@@ -6,11 +6,18 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
-from backend.app.core.auth import require_admin
+from backend.app.core.auth import (
+    require_admin, hash_password, invalidate_assignment_cache,
+    role_allows_brand_scope, role_allows_multi_hotel,
+    ROLE_HOTEL_MM, ROLE_BRAND_MANAGER, ROLE_AREA_MANAGER, ROLE_AGENCY,
+)
 from backend.app.core.database import get_firestore
-from backend.app.core.auth import hash_password
-from backend.app.models.schemas import UserCreate, UserOut, CSVUploadResponse, BrandUSP, AdminSettings
+from backend.app.models.schemas import (
+    UserCreate, UserOut, CSVUploadResponse, BrandUSP, AdminSettings,
+    ScopeAssignment, ScopeSummary,
+)
 from backend.app.services.csv_ingestion import ingest_historical_csv, ingest_brand_usp_csv
+from backend.app.services.hotels import catalog as hotel_catalog
 
 AVAILABLE_MODELS = [
     {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
@@ -39,51 +46,151 @@ def calculate_cost_inr(model: str, input_tokens: int, output_tokens: int) -> flo
 router = APIRouter()
 
 
-# ── User Management ──────────────────────────────────
+# ──────────────────────────────────────────────────────────────────
+# Helpers — assignment validation + denormalized scope_summary
+# ──────────────────────────────────────────────────────────────────
+
+
+def _validate_assignments(role: str, assignments: list[ScopeAssignment]) -> None:
+    """Reject role↔assignment combinations the data model doesn't allow."""
+    if role == "admin":
+        return  # admin assignments are ignored — they have everything
+    if role == ROLE_HOTEL_MM:
+        if len(assignments) != 1 or assignments[0].scope != "hotel":
+            raise HTTPException(400, "hotel_marketing_manager must have exactly 1 hotel assignment.")
+    if role == ROLE_BRAND_MANAGER:
+        # Brand managers are brand-scoped only
+        for a in assignments:
+            if a.scope != "brand":
+                raise HTTPException(400, "brand_manager assignments must be brand-scoped only.")
+    if role == ROLE_AREA_MANAGER:
+        # Area managers are hotel-scoped only (no brand-level access)
+        for a in assignments:
+            if a.scope != "hotel":
+                raise HTTPException(400, "area_manager assignments must be hotel-scoped only.")
+    if not role_allows_multi_hotel(role) and sum(1 for a in assignments if a.scope == "hotel") > 1:
+        raise HTTPException(400, f"Role '{role}' cannot have more than one hotel.")
+    # Field-level — every assignment carries the right id
+    for a in assignments:
+        if a.scope == "brand" and not a.brand_id:
+            raise HTTPException(400, "brand_id required on brand-scope assignments.")
+        if a.scope == "hotel" and not a.hotel_id:
+            raise HTTPException(400, "hotel_id required on hotel-scope assignments.")
+        if a.scope == "brand" and not role_allows_brand_scope(role):
+            raise HTTPException(400, f"Role '{role}' cannot hold brand-scope assignments.")
+
+
+def _write_assignments(uid: str, assignments: list[ScopeAssignment]) -> None:
+    """Replace the user's assignment list (idempotent)."""
+    db = get_firestore()
+    items_ref = db.collection("property_assignments").document(uid).collection("items")
+    # Delete existing first
+    for d in items_ref.stream():
+        d.reference.delete()
+    # Write new
+    for a in assignments:
+        item = {
+            "scope": a.scope,
+            "brand_id": a.brand_id or None,
+            "hotel_id": a.hotel_id or None,
+            "granted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        items_ref.add(item)
+    invalidate_assignment_cache(uid)
+
+
+def _build_scope_summary(assignments: list[ScopeAssignment]) -> ScopeSummary:
+    """Resolve assignment IDs back to display names so the UI can chip them."""
+    brand_names: list[str] = []
+    hotel_names: list[str] = []
+    db = get_firestore()
+    for a in assignments:
+        if a.scope == "brand" and a.brand_id:
+            d = db.collection("brands").document(a.brand_id).get()
+            if d.exists:
+                brand_names.append((d.to_dict() or {}).get("brand_name", ""))
+        elif a.scope == "hotel" and a.hotel_id:
+            d = db.collection("hotels").document(a.hotel_id).get()
+            if d.exists:
+                hotel_names.append((d.to_dict() or {}).get("hotel_name", ""))
+    return ScopeSummary(
+        brand_count=len(brand_names),
+        hotel_count=len(hotel_names),
+        brand_names=brand_names[:3],
+        hotel_names=hotel_names[:3],
+    )
+
+
+def _user_to_out(uid: str, data: dict, assignments: list[dict] | None = None) -> UserOut:
+    """Fold a Firestore user doc + assignments into UserOut."""
+    if assignments is None:
+        try:
+            items = list(
+                get_firestore().collection("property_assignments").document(uid).collection("items").stream()
+            )
+            assignments = [a.to_dict() for a in items]
+        except Exception:
+            assignments = []
+    summary = _build_scope_summary([ScopeAssignment(**a) for a in assignments]) if assignments else ScopeSummary()
+    return UserOut(
+        uid=uid,
+        full_name=data.get("full_name", ""),
+        email=data.get("email", ""),
+        role=data.get("role", "user"),
+        show_token_count=bool(data.get("show_token_count", False)),
+        show_token_amount=bool(data.get("show_token_amount", False)),
+        scope_summary=summary,
+        created_at=data.get("created_at"),
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
+# User Management — v2.2
+# ──────────────────────────────────────────────────────────────────
+
+
 @router.post("/admin/users", response_model=UserOut)
 async def create_user(body: UserCreate, admin: dict = Depends(require_admin)):
     db = get_firestore()
-
-    # Check duplicate
     existing = list(
         db.collection("users").where("email", "==", body.email).limit(1).stream()
     )
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    _validate_assignments(body.role, body.assignments)
+
     user_doc = {
         "full_name": body.full_name,
         "email": body.email,
         "password_hash": hash_password(body.password),
         "role": body.role,
+        "show_token_count": bool(body.show_token_count),
+        "show_token_amount": bool(body.show_token_amount),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": admin["sub"],
     }
     _, ref = db.collection("users").add(user_doc)
+    _write_assignments(ref.id, body.assignments)
 
-    return UserOut(
-        uid=ref.id,
-        full_name=body.full_name,
-        email=body.email,
-        role=body.role,
-        created_at=user_doc["created_at"],
-    )
+    return _user_to_out(ref.id, user_doc, [a.model_dump() for a in body.assignments])
 
 
 @router.get("/admin/users", response_model=list[UserOut])
 async def list_users(admin: dict = Depends(require_admin)):
     db = get_firestore()
-    docs = db.collection("users").stream()
-    return [
-        UserOut(
-            uid=doc.id,
-            full_name=doc.to_dict()["full_name"],
-            email=doc.to_dict()["email"],
-            role=doc.to_dict()["role"],
-            created_at=doc.to_dict().get("created_at"),
-        )
-        for doc in docs
-    ]
+    docs = list(db.collection("users").stream())
+    return [_user_to_out(d.id, d.to_dict() or {}) for d in docs]
+
+
+@router.get("/admin/users/{user_id}", response_model=UserOut)
+async def get_user(user_id: str, admin: dict = Depends(require_admin)):
+    db = get_firestore()
+    d = db.collection("users").document(user_id).get()
+    if not d.exists:
+        raise HTTPException(404, "User not found")
+    items = list(db.collection("property_assignments").document(user_id).collection("items").stream())
+    return _user_to_out(user_id, d.to_dict() or {}, [i.to_dict() for i in items])
 
 
 @router.delete("/admin/users/{user_id}")
@@ -93,7 +200,11 @@ async def delete_user(user_id: str, admin: dict = Depends(require_admin)):
     doc = doc_ref.get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail="User not found")
+    # Cascade: clear assignments first
+    for d in db.collection("property_assignments").document(user_id).collection("items").stream():
+        d.reference.delete()
     doc_ref.delete()
+    invalidate_assignment_cache(user_id)
     return {"message": "User deleted"}
 
 
@@ -105,23 +216,30 @@ async def update_user(user_id: str, body: UserCreate, admin: dict = Depends(requ
     if not doc.exists:
         raise HTTPException(status_code=404, detail="User not found")
 
+    _validate_assignments(body.role, body.assignments)
+
     update_data = {
         "full_name": body.full_name,
         "email": body.email,
         "role": body.role,
+        "show_token_count": bool(body.show_token_count),
+        "show_token_amount": bool(body.show_token_amount),
     }
     if body.password:
         update_data["password_hash"] = hash_password(body.password)
-
     doc_ref.update(update_data)
+
+    _write_assignments(user_id, body.assignments)
+
     updated = doc_ref.get().to_dict()
-    return UserOut(
-        uid=user_id,
-        full_name=updated["full_name"],
-        email=updated["email"],
-        role=updated["role"],
-        created_at=updated.get("created_at"),
-    )
+    return _user_to_out(user_id, updated, [a.model_dump() for a in body.assignments])
+
+
+# Scope search — for the cascading PropertySwitcher in the user form
+@router.get("/admin/scope-search")
+async def admin_scope_search(q: str = "", limit: int = 30, admin: dict = Depends(require_admin)):
+    rows = hotel_catalog.search_scope(q, limit=limit)
+    return {"results": rows}
 
 
 # ── CSV Uploads ──────────────────────────────────────

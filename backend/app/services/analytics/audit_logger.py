@@ -40,8 +40,17 @@ async def log_generation(
     ad_content: str = "",
     training_run_id: str = "",
     request_type: str = "ad_copy",
+    generation_id: str = "",
+    app_version: str = "",
+    scope: str = "",
+    hotel_id: str = "",
+    status: str = "ok",
+    error_message: str = "",
 ) -> None:
-    """Stream one row to vantage.generation_audit."""
+    """Stream one row to vantage.generation_audit. Extended in v2.2 with
+    generation_id (UUID), app_version, scope (hotel|brand|multi), hotel_id,
+    and status (ok|error) so we can answer 'show me all the failed brand-level
+    generations on app version 2.2 from yesterday' in BigQuery."""
     content_hash = hashlib.sha256(ad_content.encode()).hexdigest()[:16] if ad_content else ""
     row = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -55,6 +64,12 @@ async def log_generation(
         "ad_content_hash": content_hash,
         "training_run_id": training_run_id,
         "request_type": request_type,
+        "generation_id": generation_id,
+        "app_version": app_version,
+        "scope": scope,
+        "hotel_id": hotel_id,
+        "status": status,
+        "error_message": (error_message or "")[:500],
     }
     _insert_rows("generation_audit", [row])
 

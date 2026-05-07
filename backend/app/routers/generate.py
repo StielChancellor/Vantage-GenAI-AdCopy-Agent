@@ -68,10 +68,43 @@ async def generate_ads(
     body: AdGenerationRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    import logging as _logging
+    _gen_log = _logging.getLogger("vantage.generate")
     try:
         result = await generate_ad_copy(body)
     except Exception as e:
         error_msg = str(e)
+        # v2.2: structured error log so it shows up grouped in Cloud Run by user/hotel.
+        _gen_log.error(
+            "generate_failed",
+            extra={"json_fields": {
+                "user_email": current_user.get("sub"),
+                "hotel_name": body.hotel_name,
+                "platforms": body.platforms,
+                "exc_type": type(e).__name__,
+                "exc": error_msg[:500],
+            }},
+            exc_info=True,
+        )
+        # Best-effort BQ row for failed generation
+        try:
+            from backend.app.services.analytics import audit_logger
+            from backend.app.core.version import APP_VERSION
+            await audit_logger.log_generation(
+                brand_id=str(body.hotel_name),
+                user_id=current_user.get("uid", ""),
+                platform=",".join(body.platforms or []),
+                model="",
+                tokens_in=0, tokens_out=0, latency_ms=0,
+                generation_id="",
+                app_version=APP_VERSION,
+                scope=getattr(getattr(body, "selection", None), "scope", "hotel") or "hotel",
+                request_type="ad_copy",
+                status="error",
+                error_message=error_msg,
+            )
+        except Exception:
+            pass
         if "429" in error_msg or "quota" in error_msg.lower():
             raise HTTPException(
                 status_code=429,
@@ -82,11 +115,12 @@ async def generate_ads(
     # Calculate cost in INR
     cost_inr = calculate_cost_inr(result.model_used, result.input_tokens, result.output_tokens)
 
-    # Audit log with full details
+    # Audit log with full details (Firestore — kept for backwards compat with legacy admin views)
     db = get_firestore()
     db.collection("audit_logs").add(
         {
             "user_email": current_user["sub"],
+            "user_id": current_user.get("uid", ""),
             "action": "generate",
             "hotel_name": body.hotel_name,
             "offer_name": body.offer_name,
@@ -105,6 +139,8 @@ async def generate_ads(
             "time_seconds": result.time_seconds,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "session_id": current_user.get("session_id"),
+            "generation_id": result.generation_id,
+            "app_version": result.app_version,
         }
     )
 
