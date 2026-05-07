@@ -38,7 +38,7 @@ def update_backend(version: str, date_str: str) -> None:
     text = re.sub(r'APP_VERSION\s*=\s*"[^"]*"', f'APP_VERSION = "{version}"', text)
     text = re.sub(r'APP_VERSION_DATE\s*=\s*"[^"]*"', f'APP_VERSION_DATE = "{date_str}"', text)
     BACKEND_VERSION.write_text(text, encoding="utf-8")
-    print(f"  ✓ {BACKEND_VERSION.relative_to(REPO_ROOT)}")
+    print(f"  [ok]{BACKEND_VERSION.relative_to(REPO_ROOT)}")
 
 
 def update_frontend_js(version: str, date_str: str) -> None:
@@ -46,7 +46,7 @@ def update_frontend_js(version: str, date_str: str) -> None:
     text = re.sub(r'APP_VERSION\s*=\s*"[^"]*"', f'APP_VERSION = "{version}"', text)
     text = re.sub(r'APP_VERSION_DATE\s*=\s*"[^"]*"', f'APP_VERSION_DATE = "{date_str}"', text)
     FRONTEND_VERSION.write_text(text, encoding="utf-8")
-    print(f"  ✓ {FRONTEND_VERSION.relative_to(REPO_ROOT)}")
+    print(f"  [ok]{FRONTEND_VERSION.relative_to(REPO_ROOT)}")
 
 
 def update_package_json(version: str) -> None:
@@ -55,7 +55,7 @@ def update_package_json(version: str) -> None:
     npm_version = version if version.count(".") == 2 else f"{version}.0"
     pkg["version"] = npm_version
     FRONTEND_PACKAGE.write_text(json.dumps(pkg, indent=2) + "\n", encoding="utf-8")
-    print(f"  ✓ {FRONTEND_PACKAGE.relative_to(REPO_ROOT)}  (set to {npm_version})")
+    print(f"  [ok]{FRONTEND_PACKAGE.relative_to(REPO_ROOT)}  (set to {npm_version})")
 
 
 def update_readme(version: str, date_str: str) -> None:
@@ -64,16 +64,16 @@ def update_readme(version: str, date_str: str) -> None:
     if HEADER_RE.search(text):
         text = HEADER_RE.sub(new_line, text, count=1)
     else:
-        # Insert just under the H1 title.
+        # Insert just under the H1 title with a blank line on each side.
         text = re.sub(
             r"^(# [^\n]+\n)",
-            rf"\1\n{new_line}\n",
+            rf"\1\n{new_line}\n\n",
             text,
             count=1,
             flags=re.MULTILINE,
         )
     README.write_text(text, encoding="utf-8")
-    print(f"  ✓ {README.relative_to(REPO_ROOT)}")
+    print(f"  [ok]{README.relative_to(REPO_ROOT)}")
 
 
 def main() -> int:
@@ -86,7 +86,7 @@ def main() -> int:
         print(f"Invalid version '{args.version}'. Expected MAJOR.MINOR or MAJOR.MINOR.PATCH.", file=sys.stderr)
         return 2
 
-    print(f"Bumping app version → {args.version} (date: {args.date})")
+    print(f"Bumping app version -> {args.version} (date: {args.date})")
     update_backend(args.version, args.date)
     update_frontend_js(args.version, args.date)
     update_package_json(args.version)
