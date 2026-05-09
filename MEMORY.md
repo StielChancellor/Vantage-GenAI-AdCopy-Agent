@@ -3,6 +3,40 @@
 A running record of where the project is. Read this first when picking the
 work back up. Last updated: 2026-05-09 (App v2.4).
 
+## v2.4 hotfix sweep (2026-05-09 PM)
+
+QA pass via Claude-in-Chrome MCP found one critical bug + minor polish items:
+
+- **`POST /generate` was 500-ing on every call.** `_build_user_prompt` in
+  `services/ad_generator.py` had a stale reference to `primary_ct` (a local
+  in `generate_ad_copy`). Recompute inline via `_primary_campaign_type(request.platforms)`.
+- **`/generate/url-suggestions` 500s** are now silently swallowed — composite
+  index missing, but it's a non-essential autocomplete and shouldn't pollute
+  the console.
+- **Picker dropdown empty rows** — root cause was the broad `.em-switcher input`
+  CSS rule applying `width:100%/padding/border-radius` to row checkboxes.
+  Selector was tightened to `.em-switcher > input` + `input[type=text/search]`.
+- **Picker "No matches" shadow** — empty state now only renders when EVERY
+  group (loyalty / cities / brands / hotels) is empty, so folded-in selected
+  chips remain deselectable.
+- **Hub Switch context modal scroll** — modal now caps at 80vh with the picker
+  scrolling internally; the action footer is sticky so the "Use this for Ad
+  Copy" button is always reachable.
+- **LandingPage version label** — `v2.6` hardcoded badges replaced with
+  `{APP_VERSION}` so landing stays in sync with `core/version.py`.
+
+Re-QA after hotfix (10 scenarios, all ✅):
+1. Picker dropdown rows render real labels
+2. Single hotel auto-fill (URL + rooms/F&B summary)
+3. Generate single → 200 (2,130 tok / 15.5s)
+4. Multi-hotel combined → 200 (2,060 tok / 23.2s)
+5. Multi-hotel separate fan-out → 200 (4,244 tok / 33.8s; variant labels suffixed per hotel)
+6. Brand-only generation without URLs → 200 (762 tok)
+7. Club ITC loyalty → 200 (875 tok); cross-brand exemplars verified
+8. Recent generations Re-use brief repopulates form
+9. Hub Switch context modal → multi-select → /adcopy with chips applied
+10. 42 /api/v1/* requests, all 200; no 500s on /generate or /hotels/*
+
 ## v2.4 — Intelligent Ad Copy Builder + Club ITC + Chain/City Hierarchy (2026-05-09)
 
 - **Club ITC** is now bootstrapped on every backend startup as a

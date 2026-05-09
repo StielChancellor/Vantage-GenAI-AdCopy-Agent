@@ -139,7 +139,7 @@ export default function Hub() {
             zIndex: 1000, paddingTop: '10vh',
           }}
         >
-          <div className="em-card" style={{ width: 'min(640px, 92vw)', display: 'grid', gap: 14 }}>
+          <div className="em-card" style={{ width: 'min(640px, 92vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <div>
                 <div className="em-mono-label">Switch context</div>
@@ -154,12 +154,14 @@ export default function Hub() {
             <p style={{ fontSize: 12.5, color: 'var(--em-ink-soft)', margin: 0 }}>
               Multi-select is on. The Ad Copy form will pre-fill from the chosen entities and ask whether you want a unified ad or one per entity.
             </p>
-            <IntelligentPropertyPicker
-              value={pickerSelection}
-              onChange={setPickerSelection}
-              scopeSummary={me?.scope_summary || null}
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              <IntelligentPropertyPicker
+                value={pickerSelection}
+                onChange={setPickerSelection}
+                scopeSummary={me?.scope_summary || null}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 8, borderTop: '1px solid var(--em-line)' }}>
               <button className="em-btn" onClick={() => setPickerOpen(false)}>Cancel</button>
               <button
                 className="em-btn primary"
