@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   generateAds, refineAds, getUrlSuggestions, placesAutocomplete,
   getMe, getHotelContext, getBrandContext,
@@ -23,9 +24,12 @@ const PLATFORMS = [
 const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
 
 export default function Dashboard() {
+  const location = useLocation();
   const [viewMode, setViewMode] = useState('builder');
   // v2.4 — IntelligentPropertyPicker selection (replaces ContextSelector).
-  const [selection, setSelection] = useState(null);
+  // Honor a selection passed via router state (e.g., from the Hub's "Switch
+  // property / brand" modal).
+  const [selection, setSelection] = useState(() => location.state?.selection || null);
   const [scopeSummary, setScopeSummary] = useState(null);
   const [autoFilledKeys, setAutoFilledKeys] = useState(new Set());
 
@@ -53,6 +57,11 @@ export default function Dashboard() {
   const [carouselMode, setCarouselMode] = useState('suggest');
   const [carouselCards, setCarouselCards] = useState(['', '', '']);
 
+  // v2.4 — generation mode for multi-select picks.
+  // 'unified'  → one combined ad copy spanning every entity selected
+  // 'per_entity' → one ad per brand + one ad per hotel (server fans out)
+  const [fanoutMode, setFanoutMode] = useState('unified');
+
   // Refinement
   const [refining, setRefining] = useState(false);
 
@@ -68,80 +77,91 @@ export default function Dashboard() {
     })();
   }, []);
 
-  // v2.4 — auto-fill the form when the user picks exactly one hotel or brand.
+  // v2.4 — auto-fill the form when the user picks one or more hotels.
+  // For 1+ hotels: fetch contexts in parallel and merge ALL website URLs + GMB listings.
+  // For 1 brand alone (loyalty or otherwise): fill voice / leave URLs blank — the
+  // submit validator below permits empty URL/GMB for brand/loyalty/city scopes.
   useEffect(() => {
     if (!selection) return;
-    const onlyHotel =
-      (selection.hotel_ids?.length || 0) === 1 &&
-      (selection.brand_ids?.length || 0) === 0 &&
-      (selection.cities?.length || 0) === 0;
-    const onlyBrand =
-      (selection.brand_ids?.length || 0) === 1 &&
-      (selection.hotel_ids?.length || 0) === 0 &&
-      (selection.cities?.length || 0) === 0;
+    const hotelIds = selection.hotel_ids || [];
+    const brandIds = selection.brand_ids || [];
+    const cities = selection.cities || [];
+    const onlyBrandsNoHotels =
+      brandIds.length === 1 && hotelIds.length === 0 && cities.length === 0;
 
     let cancelled = false;
     (async () => {
       const filled = new Set();
       try {
-        if (onlyHotel) {
-          const r = await getHotelContext(selection.hotel_ids[0]);
+        if (hotelIds.length > 0) {
+          // Fetch every selected hotel's context in parallel.
+          const responses = await Promise.allSettled(
+            hotelIds.map((id) => getHotelContext(id))
+          );
           if (cancelled) return;
-          const h = r.data?.hotel || {};
-          const nextForm = {};
-          if (h.website_url) {
-            nextForm.reference_urls = Array.from(new Set([...(form.reference_urls || []), h.website_url]));
-            filled.add('reference_urls');
+          const newRefUrls = [];
+          const newListings = [];
+          const summaryBits = [];
+          for (const res of responses) {
+            if (res.status !== 'fulfilled') continue;
+            const h = res.value.data?.hotel || {};
+            if (h.website_url) newRefUrls.push(h.website_url);
+            if (h.gmb_url) {
+              newListings.push({
+                name: h.hotel_name || 'Listing',
+                place_id: h.gmb_place_id || '',
+                google_url: h.gmb_url,
+                rating: '',
+                review_count: 0,
+                address: h.city || '',
+              });
+            }
+            const bits = [];
+            if (h.rooms_count) bits.push(`${h.rooms_count}-room`);
+            if (h.fnb_count) bits.push(`${h.fnb_count} F&B`);
+            if (h.city) bits.push(h.city);
+            if (bits.length) summaryBits.push(`${h.hotel_name}: ${bits.join(' · ')}`);
           }
-          if (h.gmb_url) {
-            // Listing entries are objects with a google_url field — map to that shape.
-            const already = (form.google_listing_urls || []).some((p) => p.google_url === h.gmb_url);
-            if (!already) {
-              nextForm.google_listing_urls = [
-                ...(form.google_listing_urls || []),
-                {
-                  name: h.hotel_name || 'Listing',
-                  place_id: h.gmb_place_id || '',
-                  google_url: h.gmb_url,
-                  rating: '',
-                  review_count: 0,
-                  address: h.city || '',
-                },
-              ];
+          setForm((prev) => {
+            const refMerged = Array.from(new Set([...(prev.reference_urls || []), ...newRefUrls]));
+            // De-dupe listings by google_url.
+            const existingUrls = new Set((prev.google_listing_urls || []).map((p) => p.google_url));
+            const listingsMerged = [
+              ...(prev.google_listing_urls || []),
+              ...newListings.filter((l) => l.google_url && !existingUrls.has(l.google_url)),
+            ];
+            const updates = {};
+            if (refMerged.length !== (prev.reference_urls || []).length) {
+              updates.reference_urls = refMerged;
+              filled.add('reference_urls');
+            }
+            if (listingsMerged.length !== (prev.google_listing_urls || []).length) {
+              updates.google_listing_urls = listingsMerged;
               filled.add('google_listing_urls');
             }
-          }
-          // Build a friendly Other Information line if blank.
-          if (!form.other_info) {
-            const bits = [];
-            if (h.rooms_count) bits.push(`${h.rooms_count}-room property`);
-            if (h.fnb_count) bits.push(`${h.fnb_count} F&B outlet${h.fnb_count !== 1 ? 's' : ''}`);
-            if (h.city) bits.push(`${h.city}`);
-            if (bits.length) {
-              nextForm.other_info = bits.join(' · ');
+            if (!prev.other_info && summaryBits.length) {
+              updates.other_info = summaryBits.join(' · ');
               filled.add('other_info');
             }
-          }
-          if (Object.keys(nextForm).length) {
-            setForm((prev) => ({ ...prev, ...nextForm }));
-          }
-        } else if (onlyBrand) {
-          const r = await getBrandContext(selection.brand_ids[0]);
+            return Object.keys(updates).length ? { ...prev, ...updates } : prev;
+          });
+        } else if (onlyBrandsNoHotels) {
+          // Brand-only / loyalty pick — no per-hotel URLs, just inherit voice.
+          const r = await getBrandContext(brandIds[0]);
           if (cancelled) return;
           const b = r.data?.brand || {};
           const isLoyalty = b.kind === 'loyalty';
-          if (isLoyalty) {
-            // Loyalty mode — clear hotel-specific fields and lock with a flag-y line.
-            setForm((prev) => ({
-              ...prev,
-              other_info: prev.other_info || (b.voice || `Loyalty programme: ${b.brand_name}`),
-              google_listing_urls: [],
-            }));
-            filled.add('other_info');
-          } else if (b.voice && !form.other_info) {
-            setForm((prev) => ({ ...prev, other_info: b.voice }));
-            filled.add('other_info');
-          }
+          setForm((prev) => {
+            const updates = {};
+            if (!prev.other_info && b.voice) {
+              updates.other_info = b.voice;
+              filled.add('other_info');
+            } else if (isLoyalty && !prev.other_info) {
+              updates.other_info = `Loyalty programme: ${b.brand_name}`;
+              filled.add('other_info');
+            }
+            return Object.keys(updates).length ? { ...prev, ...updates } : prev;
+          });
         }
       } catch {
         /* best-effort auto-fill; keep existing values on error */
@@ -151,7 +171,11 @@ export default function Dashboard() {
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection?.hotel_ids?.[0], selection?.brand_ids?.[0]]);
+  }, [
+    (selection?.hotel_ids || []).join(','),
+    (selection?.brand_ids || []).join(','),
+    (selection?.cities || []).join(','),
+  ]);
 
   // v2.3 keyboard shortcuts: ⌘⏎ generate, ⌘K toggle copilot
   useEffect(() => {
@@ -319,7 +343,31 @@ export default function Dashboard() {
       brand_ids: selection.brand_ids || [],
       cities: selection.cities || [],
       is_loyalty: !!selection.is_loyalty,
+      generation_mode: needsFanoutPrompt() ? fanoutMode : undefined,
     };
+  };
+
+  // v2.4 — when the user has picked more than one entity (multiple hotels,
+  // multiple brands, brand+hotels, etc.) we need to ask whether to combine
+  // them into a single ad or fan out per entity.
+  const needsFanoutPrompt = () => {
+    if (!selection) return false;
+    const entities =
+      (selection.hotel_ids?.length || 0) +
+      (selection.brand_ids?.length || 0) +
+      (selection.cities?.length || 0);
+    return entities > 1;
+  };
+
+  // v2.4 — for brand / loyalty / city scopes the URL + GMB fields can stay empty.
+  const urlOptional = () => {
+    if (!selection) return false;
+    const noHotels = (selection.hotel_ids?.length || 0) === 0;
+    return noHotels && (
+      (selection.brand_ids?.length || 0) > 0 ||
+      (selection.cities?.length || 0) > 0 ||
+      selection.is_loyalty
+    );
   };
 
   const handleSubmit = async (e) => {
@@ -328,7 +376,7 @@ export default function Dashboard() {
       toast.error('Pick a hotel, brand, or city to start.');
       return;
     }
-    if (form.reference_urls.length === 0) {
+    if (!urlOptional() && form.reference_urls.length === 0) {
       toast.error('Add at least one reference URL');
       return;
     }
@@ -437,6 +485,33 @@ export default function Dashboard() {
                   Loyalty mode — ads will draw on chain-wide voice (anonymized exemplars from every partner brand). GMB and per-property fields are ignored.
                 </p>
               )}
+              {needsFanoutPrompt() && (
+                <div className="form-group" style={{ marginTop: 12 }}>
+                  <label>Generation mode</label>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    <label className="radio-label" style={{ flex: '1 1 240px' }}>
+                      <input
+                        type="radio"
+                        name="fanout-mode"
+                        value="unified"
+                        checked={fanoutMode === 'unified'}
+                        onChange={() => setFanoutMode('unified')}
+                      />
+                      One combined ad copy across every selection
+                    </label>
+                    <label className="radio-label" style={{ flex: '1 1 240px' }}>
+                      <input
+                        type="radio"
+                        name="fanout-mode"
+                        value="per_entity"
+                        checked={fanoutMode === 'per_entity'}
+                        onChange={() => setFanoutMode('per_entity')}
+                      />
+                      Separate ad copy per brand + per hotel
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="form-row">
@@ -460,7 +535,15 @@ export default function Dashboard() {
 
               {/* Reference URLs with autocomplete */}
               <div className="form-group" style={{ position: 'relative' }}>
-                <label>Reference URLs * <span style={{ fontSize: '0.7rem', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(type URL &amp; press Enter)</span></label>
+                <label>
+                  Reference URLs {urlOptional() ? '' : '*'}
+                  {' '}
+                  <span style={{ fontSize: '0.7rem', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                    {urlOptional()
+                      ? '(optional for brand / loyalty / city scope)'
+                      : '(type URL & press Enter)'}
+                  </span>
+                </label>
                 <div className="url-tags-container" onClick={() => document.getElementById('url-input').focus()}>
                   {form.reference_urls.map((url, i) => (
                     <div key={i} className="url-tag">

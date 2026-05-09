@@ -11,10 +11,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Megaphone, Mail, Zap, Calendar, ArrowRight, MessageSquare, Plus, BookmarkCheck,
+  Megaphone, Mail, Zap, Calendar, ArrowRight, MessageSquare, Plus, BookmarkCheck, X,
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+import IntelligentPropertyPicker from '../components/IntelligentPropertyPicker';
 
 const TOOLS = [
   { id: 'adcopy',  num: '01 / Tool', icon: Megaphone, title: 'Ad Copy',
@@ -37,6 +38,8 @@ export default function Hub() {
   const [me, setMe] = useState(null);
   const [billing, setBilling] = useState(null);
   const [recents, setRecents] = useState([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSelection, setPickerSelection] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -120,10 +123,63 @@ export default function Hub() {
           </div>
         </div>
         <div className="em-right">
-          <button className="em-btn sm" onClick={() => navigate('/account')}>Switch context</button>
+          <button className="em-btn sm" onClick={() => setPickerOpen(true)}>Switch property / brand</button>
           <button className="em-btn sm ghost" onClick={() => navigate('/account')}>Edit identity</button>
         </div>
       </div>
+
+      {pickerOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => { if (e.target === e.currentTarget) setPickerOpen(false); }}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(22,21,19,0.45)',
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+            zIndex: 1000, paddingTop: '10vh',
+          }}
+        >
+          <div className="em-card" style={{ width: 'min(640px, 92vw)', display: 'grid', gap: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <div>
+                <div className="em-mono-label">Switch context</div>
+                <h3 className="em-display" style={{ margin: '4px 0 0', fontSize: 22 }}>
+                  Pick a <em>property, brand, city, or Club ITC</em>.
+                </h3>
+              </div>
+              <button type="button" onClick={() => setPickerOpen(false)} className="em-btn sm ghost">
+                <X size={14} />
+              </button>
+            </div>
+            <p style={{ fontSize: 12.5, color: 'var(--em-ink-soft)', margin: 0 }}>
+              Multi-select is on. The Ad Copy form will pre-fill from the chosen entities and ask whether you want a unified ad or one per entity.
+            </p>
+            <IntelligentPropertyPicker
+              value={pickerSelection}
+              onChange={setPickerSelection}
+              scopeSummary={me?.scope_summary || null}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="em-btn" onClick={() => setPickerOpen(false)}>Cancel</button>
+              <button
+                className="em-btn primary"
+                onClick={() => {
+                  setPickerOpen(false);
+                  navigate('/adcopy', { state: { selection: pickerSelection } });
+                }}
+                disabled={
+                  !pickerSelection ||
+                  ((pickerSelection.hotel_ids?.length || 0) +
+                    (pickerSelection.brand_ids?.length || 0) +
+                    (pickerSelection.cities?.length || 0) === 0)
+                }
+              >
+                Use this for Ad Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tools grid */}
       <div className="em-section-head">

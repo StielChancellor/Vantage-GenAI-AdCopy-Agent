@@ -110,22 +110,39 @@ async def get_url_suggestions(
     query: str = Query("", min_length=0),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return previously used reference URLs matching the query."""
+    """Return previously used reference URLs matching the query.
+
+    v2.4 — tolerant of the missing `audit_logs (action ==, timestamp DESC)`
+    composite index (which 500s today). Falls back to an unordered scan."""
     db = get_firestore()
-    logs = (
-        db.collection("audit_logs")
-        .where("action", "==", "generate")
-        .order_by("timestamp", direction="DESCENDING")
-        .limit(50)
-        .stream()
-    )
+    try:
+        try:
+            logs = list(
+                db.collection("audit_logs")
+                .where("action", "==", "generate")
+                .order_by("timestamp", direction="DESCENDING")
+                .limit(50)
+                .stream()
+            )
+        except Exception:
+            logs = list(
+                db.collection("audit_logs")
+                .where("action", "==", "generate")
+                .limit(150)
+                .stream()
+            )
+            logs.sort(key=lambda d: (d.to_dict() or {}).get("timestamp", ""), reverse=True)
+            logs = logs[:50]
+    except Exception:
+        # Final guard: never 500 an autocomplete call.
+        return {"suggestions": []}
 
     seen = set()
     suggestions = []
     query_lower = query.lower()
     for log in logs:
-        data = log.to_dict()
-        for url in data.get("reference_urls", []):
+        data = log.to_dict() or {}
+        for url in data.get("reference_urls", []) or []:
             if url not in seen and (not query_lower or query_lower in url.lower()):
                 seen.add(url)
                 suggestions.append(url)
@@ -176,6 +193,47 @@ def _enforce_selection_access(body: AdGenerationRequest, current_user: dict) -> 
         return
 
 
+def _explode_selection_for_fanout(body: AdGenerationRequest) -> list[dict]:
+    """v2.4 — when the user picks multiple entities AND chose `generation_mode='per_entity'`,
+    return a list of single-entity sub-selections so the caller can fan out one
+    generation per brand and per hotel. Returns [] when no fan-out is needed."""
+    sel = body.selection
+    if sel is None:
+        return []
+    if (sel.generation_mode or "") != "per_entity":
+        return []
+    n = (len(sel.hotel_ids or []) + len(sel.brand_ids or []) + len(sel.cities or []))
+    if n <= 1:
+        return []
+    sub: list[dict] = []
+    for bid in (sel.brand_ids or []):
+        sub.append({"scope": "brand", "brand_id": bid, "is_loyalty": False})
+    for hid in (sel.hotel_ids or []):
+        sub.append({"scope": "hotel", "hotel_id": hid})
+    # Cities are expanded server-side as one ad per city (treated as `multi` in retrieval).
+    for city in (sel.cities or []):
+        sub.append({"scope": "city", "cities": [city]})
+    return sub
+
+
+async def _generate_with_subselection(body: AdGenerationRequest, sub: dict, label: str):
+    """Clone the body, override selection to a single-entity sub-selection, generate."""
+    from copy import deepcopy
+    from backend.app.models.schemas import PropertySelection
+    cloned = deepcopy(body)
+    cloned.selection = PropertySelection(
+        scope=sub.get("scope", "hotel"),
+        hotel_id=sub.get("hotel_id", ""),
+        brand_id=sub.get("brand_id", ""),
+        hotel_ids=sub.get("hotel_ids", []),
+        brand_ids=sub.get("brand_ids", []),
+        cities=sub.get("cities", []),
+        is_loyalty=sub.get("is_loyalty", False),
+    )
+    cloned.hotel_name = label or cloned.hotel_name
+    return await generate_ad_copy(cloned)
+
+
 @router.post("/generate", response_model=AdGenerationResponse)
 async def generate_ads(
     body: AdGenerationRequest,
@@ -188,7 +246,77 @@ async def generate_ads(
     _enforce_selection_access(body, current_user)
 
     try:
-        result = await generate_ad_copy(body)
+        # v2.4 — fan-out path: when the user picked multiple entities and chose
+        # 'per_entity' mode, generate once per entity and merge the variants.
+        sub_selections = _explode_selection_for_fanout(body)
+        if sub_selections:
+            from backend.app.core.database import get_firestore as _gfs
+            db_for_labels = _gfs()
+            label_for = {}
+            try:
+                for sub in sub_selections:
+                    if sub.get("scope") == "brand" and sub.get("brand_id"):
+                        d = db_for_labels.collection("brands").document(sub["brand_id"]).get()
+                        if d.exists:
+                            label_for[id(sub)] = (d.to_dict() or {}).get("brand_name", "")
+                    elif sub.get("scope") == "hotel" and sub.get("hotel_id"):
+                        d = db_for_labels.collection("hotels").document(sub["hotel_id"]).get()
+                        if d.exists:
+                            label_for[id(sub)] = (d.to_dict() or {}).get("hotel_name", "")
+                    elif sub.get("scope") == "city" and sub.get("cities"):
+                        label_for[id(sub)] = sub["cities"][0]
+            except Exception:
+                pass
+
+            sub_results = []
+            for sub in sub_selections:
+                lbl = label_for.get(id(sub), body.hotel_name)
+                try:
+                    r = await _generate_with_subselection(body, sub, lbl)
+                    # Tag every variant with which entity it belongs to.
+                    for v in r.variants:
+                        v.platform = f"{v.platform} | {lbl}"
+                    sub_results.append(r)
+                except Exception as exc:
+                    _gen_log.error(
+                        "generate_subselection_failed",
+                        extra={"json_fields": {
+                            "label": lbl,
+                            "sub_scope": sub.get("scope"),
+                            "exc": str(exc)[:300],
+                        }},
+                        exc_info=True,
+                    )
+
+            if not sub_results:
+                raise RuntimeError("All per-entity generations failed.")
+
+            # Merge — sum tokens, take latest model/version, concatenate variants.
+            from backend.app.models.schemas import AdGenerationResponse as _Resp
+            from backend.app.core.version import APP_VERSION as _VER
+            merged_variants = []
+            tin = tout = ttot = 0
+            tsec = 0.0
+            for r in sub_results:
+                merged_variants.extend(r.variants)
+                tin += r.input_tokens
+                tout += r.output_tokens
+                ttot += r.tokens_used
+                tsec += r.time_seconds
+            result = _Resp(
+                hotel_name=body.hotel_name,
+                variants=merged_variants,
+                tokens_used=ttot,
+                input_tokens=tin,
+                output_tokens=tout,
+                model_used=sub_results[-1].model_used,
+                time_seconds=round(tsec, 2),
+                generated_at=sub_results[-1].generated_at,
+                generation_id=sub_results[-1].generation_id,
+                app_version=_VER,
+            )
+        else:
+            result = await generate_ad_copy(body)
     except Exception as e:
         error_msg = str(e)
         # v2.2: structured error log so it shows up grouped in Cloud Run by user/hotel.
@@ -233,10 +361,12 @@ async def generate_ads(
     cost_inr = calculate_cost_inr(result.model_used, result.input_tokens, result.output_tokens)
 
     # Audit log with full details (Firestore — kept for backwards compat with legacy admin views)
+    # Wrapped so any Firestore hiccup never fails a successful generation.
     db = get_firestore()
     sel = body.selection
-    db.collection("audit_logs").add(
-        {
+    try:
+        db.collection("audit_logs").add(
+            {
             "user_email": current_user["sub"],
             "user_id": current_user.get("uid", ""),
             "action": "generate",
@@ -262,8 +392,13 @@ async def generate_ads(
             "session_id": current_user.get("session_id"),
             "generation_id": result.generation_id,
             "app_version": result.app_version,
-        }
-    )
+            }
+        )
+    except Exception as exc:
+        _gen_log.warning(
+            "audit_log_write_failed",
+            extra={"json_fields": {"exc": str(exc)[:300]}},
+        )
 
     return result
 

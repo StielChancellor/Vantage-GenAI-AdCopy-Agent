@@ -238,16 +238,33 @@ export default function IntelligentPropertyPicker({
     0;
 
   // Group results for nice ordering: loyalty brands first, then cities, then hotel brands, then hotels.
+  // Also fold in any currently-selected rows that the latest search response omitted —
+  // this keeps the dropdown showing what the user has chosen so they can deselect.
   const grouped = useMemo(() => {
     const out = { loyalty: [], cities: [], brands: [], hotels: [] };
-    for (const r of results) {
+    const seen = new Set();
+    const push = (r) => {
+      const key = `${r.type}:${r.id || r.label}`;
+      if (seen.has(key)) return;
+      seen.add(key);
       if (r.type === 'brand' && r.kind === 'loyalty') out.loyalty.push(r);
       else if (r.type === 'brand') out.brands.push(r);
       else if (r.type === 'city') out.cities.push(r);
       else if (r.type === 'hotel') out.hotels.push(r);
+    };
+    for (const r of results) push(r);
+    // Fold selected rows back so they're visible even if the search filtered them out.
+    for (const h of (sel._labels?.hotels || [])) {
+      push({ type: 'hotel', id: h.id, label: h.label, brand_name: h.brand, city: '' });
+    }
+    for (const b of (sel._labels?.brands || [])) {
+      push({ type: 'brand', id: b.id, label: b.label, kind: b.kind, hotel_count: 0 });
+    }
+    for (const c of (sel._labels?.cities || [])) {
+      push({ type: 'city', id: c.id, label: c.label, hotel_count: 0 });
     }
     return out;
-  }, [results]);
+  }, [results, sel]);
 
   const isPicked = (row) => {
     if (row.type === 'hotel') return (sel.hotel_ids || []).includes(row.id);
@@ -361,6 +378,7 @@ export default function IntelligentPropertyPicker({
 }
 
 function Row({ row, picked, onClick, loyalty }) {
+  const label = row.label || row.id || '(unnamed)';
   return (
     <div
       className={`em-switcher-row ${row.type}${picked ? ' picked' : ''}`}
@@ -373,19 +391,19 @@ function Row({ row, picked, onClick, loyalty }) {
         <>
           <span className="em-hotel-name">
             {loyalty && <Sparkles size={12} style={{ marginRight: 6, color: 'var(--em-accent)' }} />}
-            {row.label}
+            {label}
           </span>
           <span className="em-brand-tag">{loyalty ? 'Loyalty programme' : `${row.hotel_count || 0} hotels`}</span>
         </>
       ) : row.type === 'city' ? (
         <>
-          <span className="em-hotel-name">{row.label}</span>
+          <span className="em-hotel-name">{label}</span>
           <span className="em-brand-tag">{row.hotel_count || 0} hotels</span>
         </>
       ) : (
         <>
           {row.brand_name && <span className="em-brand-tag">{row.brand_name}</span>}
-          <span className="em-hotel-name">{row.label}</span>
+          <span className="em-hotel-name">{label}</span>
           {row.city && <span className="em-brand-tag">· {row.city}</span>}
         </>
       )}
