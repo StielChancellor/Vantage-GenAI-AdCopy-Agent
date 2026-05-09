@@ -421,13 +421,21 @@
 
 /* ---------- Switcher (PropertySwitcher) ---------- */
 .em-switcher { position: relative; }
-.em-switcher input {
+/* Scope the wide-input style to text inputs ONLY — the picker rows contain
+   <input type="checkbox"> elements that must NOT inherit width:100%/padding. */
+.em-switcher > input,
+.em-switcher .em-switcher-input-wrap > input,
+.em-switcher input[type="text"],
+.em-switcher input[type="search"] {
   width: 100%; padding: 9px 12px;
   border: 1px solid var(--em-line); border-radius: 8px;
   background: var(--em-surface); font: inherit; font-size: 13.5px;
   color: var(--em-ink);
 }
-.em-switcher input:focus { outline: none; border-color: var(--em-accent); }
+.em-switcher > input:focus,
+.em-switcher .em-switcher-input-wrap > input:focus,
+.em-switcher input[type="text"]:focus,
+.em-switcher input[type="search"]:focus { outline: none; border-color: var(--em-accent); }
 .em-switcher .em-switcher-results {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0;
   background: var(--em-surface); border: 1px solid var(--em-line-strong);
