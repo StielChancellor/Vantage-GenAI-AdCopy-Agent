@@ -297,8 +297,23 @@ export default function IntelligentPropertyPicker({
           onChange={(e) => { setQ(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           placeholder={placeholderText}
-          style={{ paddingLeft: 30 }}
+          style={{ paddingLeft: 30, paddingRight: 90 }}
         />
+        {(() => {
+          const n = (sel.hotel_ids?.length || 0)
+            + (sel.brand_ids?.length || 0)
+            + (sel.cities?.length || 0);
+          if (n === 0) return null;
+          return (
+            <span
+              className="em-pill accent"
+              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11, padding: '2px 8px' }}
+              title={`${n} selected — click rows to add or remove`}
+            >
+              {n} selected
+            </span>
+          );
+        })()}
       </div>
 
       {/* Selected-chip rail */}

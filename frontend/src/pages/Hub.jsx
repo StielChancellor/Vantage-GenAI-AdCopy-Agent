@@ -124,7 +124,6 @@ export default function Hub() {
         </div>
         <div className="em-right">
           <button className="em-btn sm" onClick={() => setPickerOpen(true)}>Switch property / brand</button>
-          <button className="em-btn sm ghost" onClick={() => navigate('/account')}>Edit identity</button>
         </div>
       </div>
 
@@ -139,7 +138,7 @@ export default function Hub() {
             zIndex: 1000, paddingTop: '10vh',
           }}
         >
-          <div className="em-card" style={{ width: 'min(640px, 92vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="em-card" style={{ width: 'min(640px, 92vw)', display: 'flex', flexDirection: 'column', gap: 14, overflow: 'visible' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <div>
                 <div className="em-mono-label">Switch context</div>
@@ -152,32 +151,46 @@ export default function Hub() {
               </button>
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--em-ink-soft)', margin: 0 }}>
-              Multi-select is on. The Ad Copy form will pre-fill from the chosen entities and ask whether you want a unified ad or one per entity.
+              Multi-select is on. Click rows to add/remove. The Ad Copy form will pre-fill from the chosen entities and ask whether you want a unified ad or one per entity.
             </p>
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              <IntelligentPropertyPicker
-                value={pickerSelection}
-                onChange={setPickerSelection}
-                scopeSummary={me?.scope_summary || null}
-              />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 8, borderTop: '1px solid var(--em-line)' }}>
-              <button className="em-btn" onClick={() => setPickerOpen(false)}>Cancel</button>
-              <button
-                className="em-btn primary"
-                onClick={() => {
-                  setPickerOpen(false);
-                  navigate('/adcopy', { state: { selection: pickerSelection } });
-                }}
-                disabled={
-                  !pickerSelection ||
-                  ((pickerSelection.hotel_ids?.length || 0) +
-                    (pickerSelection.brand_ids?.length || 0) +
-                    (pickerSelection.cities?.length || 0) === 0)
-                }
-              >
-                Use this for Ad Copy
-              </button>
+            {/* No overflow wrapper here — the picker dropdown is absolute-positioned
+                and was being clipped by an outer overflow:auto. Picker dropdown
+                already self-scrolls internally (max-height 320px). */}
+            <IntelligentPropertyPicker
+              value={pickerSelection}
+              onChange={setPickerSelection}
+              scopeSummary={me?.scope_summary || null}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, paddingTop: 8, borderTop: '1px solid var(--em-line)' }}>
+              {(() => {
+                const n = (pickerSelection?.hotel_ids?.length || 0)
+                  + (pickerSelection?.brand_ids?.length || 0)
+                  + (pickerSelection?.cities?.length || 0);
+                return (
+                  <div style={{ fontSize: 12.5, color: n > 0 ? 'var(--em-accent)' : 'var(--em-ink-soft)' }}>
+                    {n === 0 ? 'Nothing selected yet' : `${n} ${n === 1 ? 'entity' : 'entities'} selected`}
+                  </div>
+                );
+              })()}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="em-btn" onClick={() => { setPickerSelection(null); }}>Clear</button>
+                <button className="em-btn" onClick={() => setPickerOpen(false)}>Cancel</button>
+                <button
+                  className="em-btn primary"
+                  onClick={() => {
+                    setPickerOpen(false);
+                    navigate('/adcopy', { state: { selection: pickerSelection } });
+                  }}
+                  disabled={
+                    !pickerSelection ||
+                    ((pickerSelection.hotel_ids?.length || 0) +
+                      (pickerSelection.brand_ids?.length || 0) +
+                      (pickerSelection.cities?.length || 0) === 0)
+                  }
+                >
+                  Use this for Ad Copy
+                </button>
+              </div>
             </div>
           </div>
         </div>
