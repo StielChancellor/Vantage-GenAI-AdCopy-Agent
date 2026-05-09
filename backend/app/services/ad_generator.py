@@ -128,17 +128,20 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         }},
     )
 
-    # 1. Gather context — scope-aware (v2.2)
+    # 1. Gather context — scope-aware (v2.2 + v2.4)
     # If frontend sent a structured selection, honor it; otherwise fall back to legacy hotel_name string.
     selection = getattr(request, "selection", None)
     scope = "hotel"
     selected_hotel_id = None
     selected_brand_id = None
     hotel_record: dict | None = None
+    brand_record: dict | None = None
+    is_loyalty = False
     if selection:
         scope = getattr(selection, "scope", "hotel") or "hotel"
         selected_hotel_id = getattr(selection, "hotel_id", None)
         selected_brand_id = getattr(selection, "brand_id", None)
+        is_loyalty = bool(getattr(selection, "is_loyalty", False))
 
     # Pull the hotel record from the catalog if we have an ID — gives us
     # rooms_count, fnb_count, gmb_url etc. without an extra HTTP fetch.
@@ -151,6 +154,20 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         except Exception as exc:
             logger.warning("hotel catalog lookup failed", extra={"json_fields": {"generation_id": generation_id, "exc": str(exc)[:200]}})
 
+    # Pull the brand record so we know its kind (hotel | loyalty) — drives
+    # cross-brand retrieval and prompt assembly.
+    if selected_brand_id:
+        try:
+            from backend.app.services.hotels import catalog as _hotel_catalog
+            brand_record = _hotel_catalog.get_brand(selected_brand_id)
+            if brand_record and brand_record.get("kind") == "loyalty":
+                is_loyalty = True
+                # Normalize the scope so downstream RAG branches loyalty mode.
+                if scope in ("brand", "hotel"):
+                    scope = "loyalty"
+        except Exception as exc:
+            logger.debug("brand lookup failed: %s", exc)
+
     primary_ct = _primary_campaign_type(getattr(request, "platforms", []))
     ad_insights = await retrieve_ad_insights(
         request.hotel_name,
@@ -160,7 +177,8 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
         brand_id=selected_brand_id,
         hotel_id=selected_hotel_id,
         hotel_name_for_anonymize=(hotel_record or {}).get("hotel_name") or request.hotel_name,
-        city_for_anonymize=None,
+        city_for_anonymize=(hotel_record or {}).get("city"),
+        is_loyalty=is_loyalty,
     )
 
     # Brand USPs & guardrails (semantic RAG)
@@ -195,8 +213,10 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     # Google Reviews insights — v2.2: skip entirely for brand-scope generations
     # (the user's "do not show GMB review to the frontend user when a brand is
     # selected" rule — both fetch + injection are skipped).
+    # v2.4 — also skip for loyalty mode (Club ITC); a loyalty programme has no
+    # single GMB profile.
     review_data: dict = {}
-    if scope != "brand":
+    if scope not in ("brand", "loyalty") and not is_loyalty:
         listing_urls = request.google_listing_urls or (
             [request.google_listing_url] if request.google_listing_url and request.google_listing_url.strip() else []
         )
@@ -218,14 +238,17 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     # Property attributes — what the model SHOULD know about the property
     # (rooms_count, fnb_count). Hotel_code and brand_name are NOT injected.
     property_attrs_block = ""
-    if scope == "hotel" and hotel_record:
+    if scope == "hotel" and hotel_record and not is_loyalty:
         bits = []
         rc = hotel_record.get("rooms_count")
         fc = hotel_record.get("fnb_count")
+        city = (hotel_record.get("city") or "").strip()
         if rc:
             bits.append(f"{rc}-room property")
         if fc:
             bits.append(f"{fc} F&B outlet{'s' if fc != 1 else ''}")
+        if city:
+            bits.append(f"located in {city}")
         if hotel_record.get("website_url"):
             bits.append(f"official site: {hotel_record['website_url']}")
         if bits:
@@ -233,6 +256,26 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
                 "\n\n## PROPERTY ATTRIBUTES (use naturally where it strengthens copy):\n- "
                 + "\n- ".join(bits)
             )
+
+    # v2.4 — Loyalty programme block (replaces property attributes for loyalty brands).
+    loyalty_block = ""
+    if is_loyalty:
+        brand_voice = (brand_record or {}).get("voice", "")
+        bits = [
+            "This brand is a LOYALTY PROGRAMME — not a single hotel.",
+            "Centre the copy on member benefits, tier progression, redemption value, and the breadth of the chain.",
+            "Do NOT reference any single property by name.",
+        ]
+        if brand_voice:
+            bits.append(f"Brand voice: {brand_voice}")
+        if ad_insights.get("cross_brand_count"):
+            bits.append(
+                f"You have {ad_insights['cross_brand_count']} anonymized exemplars from partner properties — use them for tone, never for facts."
+            )
+        loyalty_block = (
+            "\n\n## LOYALTY PROGRAMME CONTEXT (apply throughout the copy):\n- "
+            + "\n- ".join(bits)
+        )
 
     # 2. Build the system prompt with guardrails
     system_prompt = _build_system_prompt(brand_data)
@@ -255,6 +298,10 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
     # latter's signature stable for any other callers.
     if property_attrs_block:
         user_prompt = user_prompt + property_attrs_block
+    # v2.4 — loyalty block stacks below the property block (one or the other
+    # will be set, never both, since loyalty mode skips property attrs).
+    if loyalty_block:
+        user_prompt = user_prompt + loyalty_block
 
     # 4. Call Gemini via Vertex AI
     try:
@@ -324,6 +371,8 @@ async def generate_ad_copy(request: AdGenerationRequest) -> AdGenerationResponse
             "scope": scope,
             "brand_id": selected_brand_id,
             "hotel_id": selected_hotel_id,
+            "is_loyalty": is_loyalty,
+            "cross_brand_exemplars": ad_insights.get("cross_brand_count", 0),
             "platforms": request.platforms,
             "tokens_used": tokens_used,
             "time_seconds": elapsed,

@@ -450,11 +450,42 @@
 }
 .em-switcher-row.brand .em-type-badge { color: var(--em-accent); border-color: var(--em-accent-soft); background: var(--em-accent-soft); }
 
-.em-selection-chips { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
-.em-selection-chips .em-chip { padding: 4px 10px; border-radius: 999px; font-size: 12px; }
+.em-selection-chips { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.em-selection-chips .em-chip { padding: 4px 10px; border-radius: 999px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 .em-selection-chips .em-chip.brand-half { background: var(--em-accent-soft); color: var(--em-accent-ink); opacity: 0.55; border: 1px dashed var(--em-accent); }
 .em-selection-chips .em-chip.brand-full { background: var(--em-accent); color: #fff; }
 .em-selection-chips .em-chip.hotel-full { background: var(--em-ink); color: #fff; }
+.em-selection-chips .em-chip-x {
+  background: rgba(255,255,255,0.18); border: none; color: inherit;
+  width: 14px; height: 14px; border-radius: 50%; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; margin-left: 4px;
+}
+.em-selection-chips .em-chip-x:hover { background: rgba(255,255,255,0.32); }
+
+/* v2.4 — IntelligentPropertyPicker additions */
+.em-switcher-section {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--em-ink-faint);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  padding: 8px 12px 4px; background: var(--em-surface-2);
+  border-bottom: 1px solid var(--em-line);
+}
+.em-switcher-row.picked { background: var(--em-accent-soft); }
+.em-switcher-row.picked .em-hotel-name { color: var(--em-accent-ink); font-weight: 600; }
+.em-switcher-check {
+  appearance: none; width: 14px; height: 14px; border: 1.5px solid var(--em-line-strong);
+  border-radius: 3px; margin-right: 8px; background: var(--em-surface);
+  position: relative; flex-shrink: 0;
+}
+.em-switcher-check:checked {
+  background: var(--em-accent); border-color: var(--em-accent);
+}
+.em-switcher-check:checked::after {
+  content: ''; position: absolute; left: 3px; top: 0px;
+  width: 4px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.em-recent-row:hover { background: var(--em-surface-2); }
+.em-chip-loyalty { color: #fff !important; border: none !important; }
 
 .em-redacted { color: var(--em-ink-faint); font-style: italic; }
 

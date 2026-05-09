@@ -118,28 +118,62 @@ def invalidate_assignment_cache(uid: str) -> None:
     cache.pop(uid, None)
 
 
+def has_group_scope(current_user: dict) -> bool:
+    """v2.4 — does the user hold a 'group' assignment (admin-equivalent
+    access without the admin role itself)?"""
+    if current_user.get("role") == ROLE_ADMIN:
+        return True
+    return any(
+        a.get("scope") == "group"
+        for a in _get_user_assignments(current_user.get("uid", ""))
+    )
+
+
 def user_can_access_hotel(current_user: dict, hotel_id: str) -> bool:
-    """True if the current user is allowed to act on this hotel."""
+    """True if the current user is allowed to act on this hotel.
+
+    v2.4 access paths (any one wins):
+      - admin role
+      - any 'group' assignment
+      - direct hotel grant (scope='hotel', hotel_id matches)
+      - brand grant (scope='brand', brand matches the hotel's brand_id) UNLESS
+        every brand grant on the matching brand has brand_only=True
+      - city grant (scope='city', city matches the hotel's city)
+    """
     role = current_user.get("role", "")
     if role == ROLE_ADMIN:
         return True
     if not hotel_id:
         return False
     assignments = _get_user_assignments(current_user.get("uid", ""))
+    if any(a.get("scope") == "group" for a in assignments):
+        return True
     # Direct hotel grant
     for a in assignments:
         if a.get("scope") == "hotel" and a.get("hotel_id") == hotel_id:
             return True
-    # Brand grant — need to look up the hotel's brand_id
+    # Brand / city grants — need the hotel doc to check brand_id and city.
     try:
         from backend.app.core.database import get_firestore
         hotel = get_firestore().collection("hotels").document(hotel_id).get()
         if hotel.exists:
-            brand_id = hotel.to_dict().get("brand_id", "")
-            if brand_id and any(
-                a.get("scope") == "brand" and a.get("brand_id") == brand_id for a in assignments
-            ):
-                return True
+            data = hotel.to_dict() or {}
+            brand_id = data.get("brand_id", "")
+            hotel_city = (data.get("city") or "").strip()
+            if brand_id:
+                # A brand grant counts only if it's NOT brand_only (brand_only=True
+                # restricts the user to brand-level ops without per-hotel access).
+                for a in assignments:
+                    if (
+                        a.get("scope") == "brand"
+                        and a.get("brand_id") == brand_id
+                        and not bool(a.get("brand_only"))
+                    ):
+                        return True
+            if hotel_city:
+                for a in assignments:
+                    if a.get("scope") == "city" and (a.get("city") or "").strip() == hotel_city:
+                        return True
     except Exception:
         pass
     return False
@@ -156,9 +190,54 @@ def user_can_access_brand(current_user: dict, brand_id: str) -> bool:
     if not brand_id:
         return False
     assignments = _get_user_assignments(current_user.get("uid", ""))
+    if any(a.get("scope") == "group" for a in assignments):
+        return True
     return any(
         a.get("scope") == "brand" and a.get("brand_id") == brand_id for a in assignments
     )
+
+
+def resolve_user_hotel_ids(current_user: dict) -> Optional[list[str]]:
+    """Return the flat hotel-id allowlist this user can see, expanding every
+    assignment (brand → all hotels under it; city → all hotels in that city).
+
+    Returns None for admins or users with a 'group' grant — the caller should
+    treat None as 'no filtering' (all hotels visible)."""
+    if current_user.get("role") == ROLE_ADMIN or has_group_scope(current_user):
+        return None
+    assignments = _get_user_assignments(current_user.get("uid", ""))
+    out: set[str] = set()
+    try:
+        from backend.app.core.database import get_firestore
+        db = get_firestore()
+        # Direct hotel grants
+        for a in assignments:
+            if a.get("scope") == "hotel" and a.get("hotel_id"):
+                out.add(a["hotel_id"])
+        # Brand grants (brand_only=True still grants hotel-level *visibility* in lists,
+        # but generation is gated separately in user_can_access_hotel).
+        brand_ids = [a["brand_id"] for a in assignments if a.get("scope") == "brand" and a.get("brand_id")]
+        for bid in brand_ids:
+            for d in db.collection("hotels").where("brand_id", "==", bid).where("status", "==", "active").stream():
+                out.add(d.id)
+        # City grants
+        cities = [(a.get("city") or "").strip() for a in assignments if a.get("scope") == "city"]
+        cities = [c for c in cities if c]
+        for city in cities:
+            for d in db.collection("hotels").where("city", "==", city).where("status", "==", "active").stream():
+                out.add(d.id)
+    except Exception:
+        pass
+    return sorted(out)
+
+
+def resolve_user_brand_ids(current_user: dict) -> Optional[list[str]]:
+    """Return the flat brand-id allowlist for this user. None for admin/group."""
+    if current_user.get("role") == ROLE_ADMIN or has_group_scope(current_user):
+        return None
+    assignments = _get_user_assignments(current_user.get("uid", ""))
+    out = sorted({a["brand_id"] for a in assignments if a.get("scope") == "brand" and a.get("brand_id")})
+    return out
 
 
 def role_allows_brand_scope(role: str) -> bool:

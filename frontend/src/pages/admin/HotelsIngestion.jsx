@@ -15,7 +15,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../services/api';
 
-const TEMPLATE_HEADER = 'hotel_name,hotel_code,brand_name,rooms_count,fnb_count,website_url,gmb_url\n';
+const TEMPLATE_HEADER = 'hotel_name,hotel_code,brand_name,city,rooms_count,fnb_count,website_url,gmb_url\n';
 
 export default function HotelsIngestion() {
   const [mode, setMode] = useState('csv');           // 'csv' | 'manual'
@@ -25,7 +25,7 @@ export default function HotelsIngestion() {
 
   // Manual form
   const [hotel, setHotel] = useState({
-    hotel_name: '', hotel_code: '', brand_name: '',
+    hotel_name: '', hotel_code: '', brand_name: '', city: '',
     rooms_count: '', fnb_count: '', website_url: '', gmb_url: '',
   });
 
@@ -63,7 +63,7 @@ export default function HotelsIngestion() {
       });
       const r = await api.post('/hotels', form, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success(`Hotel ${r.data.action}: ${hotel.hotel_name}`);
-      setHotel({ hotel_name: '', hotel_code: '', brand_name: '', rooms_count: '', fnb_count: '', website_url: '', gmb_url: '' });
+      setHotel({ hotel_name: '', hotel_code: '', brand_name: '', city: '', rooms_count: '', fnb_count: '', website_url: '', gmb_url: '' });
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Save failed');
     } finally {
@@ -89,7 +89,8 @@ export default function HotelsIngestion() {
         </h3>
         <p style={{ color: 'var(--em-ink-soft)', fontSize: 13, margin: '4px 0 0' }}>
           Bulk-create hotels from a CSV. Brand hierarchy is built automatically from the brand_name column.
-          Rooms count + F&B count are used by the model when writing copy. Hotel code + brand name are organizational only.
+          Rooms count, F&B count and city are used by the model when writing copy. Hotel code + brand name are organizational only.
+          {' '}<strong>v2.4 — `city` is now an optional column</strong> that also drives city-level user grants.
         </p>
       </div>
 
@@ -104,7 +105,7 @@ export default function HotelsIngestion() {
         </button>
         <button type="button" className="em-mode-card" onClick={downloadTemplate}>
           <div className="t">Download CSV template</div>
-          <div className="s">7 required columns</div>
+          <div className="s">3 required + 5 optional columns</div>
         </button>
       </div>
 
@@ -162,6 +163,7 @@ export default function HotelsIngestion() {
             ['hotel_name', 'Hotel name *'],
             ['hotel_code', 'Hotel code *'],
             ['brand_name', 'Brand name *'],
+            ['city', 'City'],
             ['rooms_count', 'Rooms count'],
             ['fnb_count', 'F&B outlet count'],
             ['website_url', 'Website URL'],

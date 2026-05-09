@@ -56,6 +56,25 @@ export const updateAdminSettings = (data) => api.put('/admin/settings', data);
 export const generateAds = (data) => api.post('/generate', data);
 export const refineAds = (data) => api.post('/generate/refine', data);
 export const getUrlSuggestions = (query) => api.get(`/generate/url-suggestions?query=${encodeURIComponent(query)}`);
+export const getRecentGenerations = ({ limit = 10, hotelId = '', brandId = '' } = {}) => {
+  const params = new URLSearchParams();
+  params.append('limit', String(limit));
+  if (hotelId) params.append('hotel_id', hotelId);
+  if (brandId) params.append('brand_id', brandId);
+  return api.get(`/generate/recent?${params.toString()}`);
+};
+
+// Hotels (v2.4)
+export const getHotelContext = (hotelId) => api.get(`/hotels/${encodeURIComponent(hotelId)}/context`);
+export const getBrandContext = (brandId) => api.get(`/hotels/brands/${encodeURIComponent(brandId)}/context`);
+export const getCities = () => api.get('/hotels/cities');
+export const scopeSearch = ({ q = '', limit = 30, includeEmpty = false } = {}) => {
+  const params = new URLSearchParams();
+  if (q) params.append('q', q);
+  params.append('limit', String(limit));
+  if (includeEmpty) params.append('include_empty', 'true');
+  return api.get(`/hotels/scope-search?${params.toString()}`);
+};
 
 // Places
 export const placesAutocomplete = (query) => api.get(`/places/autocomplete?query=${encodeURIComponent(query)}`);

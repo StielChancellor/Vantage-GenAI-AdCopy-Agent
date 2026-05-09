@@ -15,7 +15,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from backend.app.core.auth import (
     get_current_user, require_admin, ROLE_ADMIN,
-    _get_user_assignments,
+    _get_user_assignments, has_group_scope, resolve_user_hotel_ids,
+    resolve_user_brand_ids, user_can_access_hotel, user_can_access_brand,
 )
 from backend.app.models.schemas import (
     HotelOut, BrandOut, HotelIngestResponse,
@@ -33,13 +34,15 @@ router = APIRouter(prefix="/hotels", tags=["Hotels"])
 
 def _allowed_scopes(current_user: dict) -> tuple[list[str] | None, list[str] | None]:
     """Return (allowed_hotel_ids, allowed_brand_ids).
-    Returns (None, None) for admin (= unlimited)."""
-    if current_user.get("role") == ROLE_ADMIN:
+
+    Returns (None, None) for admin or any user holding a 'group' assignment
+    (= unlimited). Otherwise expands brand + city + hotel grants to a flat
+    hotel-id allowlist."""
+    if current_user.get("role") == ROLE_ADMIN or has_group_scope(current_user):
         return None, None
-    assignments = _get_user_assignments(current_user.get("uid", ""))
-    hotel_ids = [a.get("hotel_id") for a in assignments if a.get("scope") == "hotel" and a.get("hotel_id")]
-    brand_ids = [a.get("brand_id") for a in assignments if a.get("scope") == "brand" and a.get("brand_id")]
-    return hotel_ids or [], brand_ids or []
+    hotel_ids = resolve_user_hotel_ids(current_user) or []
+    brand_ids = resolve_user_brand_ids(current_user) or []
+    return hotel_ids, brand_ids
 
 
 @router.get("")
@@ -66,30 +69,73 @@ async def list_brands(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/scope-search")
-async def scope_search(q: str = "", limit: int = 20, current_user: dict = Depends(get_current_user)):
-    """Free-flow brand/hotel search for the PropertySwitcher.
-    Non-admin callers only see entities they have access to."""
-    rows = catalog.search_scope(q, limit=limit)
+async def scope_search(
+    q: str = "",
+    limit: int = 30,
+    include_empty: bool = False,
+    current_user: dict = Depends(get_current_user),
+):
+    """Free-flow brand/hotel/city search for the IntelligentPropertyPicker.
+
+    v2.4 — non-admin callers see entities they have access to. include_empty=True
+    lets the picker pre-populate the dropdown with the user's whole accessible
+    set (no typing required) — used for the "show me what I can pick" initial
+    render."""
+    rows = catalog.search_scope(q, limit=limit, include_empty=include_empty)
     role = current_user.get("role", "")
-    if role == ROLE_ADMIN:
+    if role == ROLE_ADMIN or has_group_scope(current_user):
         return {"results": rows}
 
     assignments = _get_user_assignments(current_user.get("uid", ""))
-    allowed_brand = {a.get("brand_id") for a in assignments if a.get("scope") == "brand"}
-    allowed_hotel = {a.get("hotel_id") for a in assignments if a.get("scope") == "hotel"}
+    allowed_brand = {a.get("brand_id") for a in assignments if a.get("scope") == "brand" and a.get("brand_id")}
+    allowed_hotel = {a.get("hotel_id") for a in assignments if a.get("scope") == "hotel" and a.get("hotel_id")}
+    allowed_city = {(a.get("city") or "").strip() for a in assignments if a.get("scope") == "city"}
+    allowed_city.discard("")
 
     filtered = []
     for r in rows:
-        if r["type"] == "brand" and r["id"] in allowed_brand:
+        t = r.get("type")
+        if t == "brand" and r["id"] in allowed_brand:
             filtered.append(r)
-        elif r["type"] == "hotel" and (r["id"] in allowed_hotel or r.get("brand_id") in allowed_brand):
+        elif t == "city" and r["label"] in allowed_city:
+            filtered.append(r)
+        elif t == "hotel" and (
+            r["id"] in allowed_hotel
+            or r.get("brand_id") in allowed_brand
+            or (r.get("city") or "").strip() in allowed_city
+        ):
             filtered.append(r)
     return {"results": filtered}
 
 
+@router.get("/cities")
+async def list_cities(current_user: dict = Depends(get_current_user)):
+    """Return distinct hotel cities (with hotel counts) the user can see.
+
+    Admin/group sees every city. Other users see only the cities containing
+    at least one hotel they can access via brand/hotel/city grants."""
+    rows = catalog.list_cities()
+    if current_user.get("role") == ROLE_ADMIN or has_group_scope(current_user):
+        return {"cities": rows}
+    allowed_hotel_ids = set(resolve_user_hotel_ids(current_user) or [])
+    if not allowed_hotel_ids:
+        return {"cities": []}
+    # Build a city → set of accessible hotel_ids map.
+    from backend.app.core.database import get_firestore
+    db = get_firestore()
+    accessible: dict[str, int] = {}
+    for hid in allowed_hotel_ids:
+        d = db.collection("hotels").document(hid).get()
+        if not d.exists:
+            continue
+        city = ((d.to_dict() or {}).get("city") or "").strip()
+        if city:
+            accessible[city] = accessible.get(city, 0) + 1
+    return {"cities": [{"city": c, "hotel_count": n} for c, n in sorted(accessible.items())]}
+
+
 @router.get("/{hotel_id}")
 async def get_hotel(hotel_id: str, current_user: dict = Depends(get_current_user)):
-    from backend.app.core.auth import user_can_access_hotel
     if not user_can_access_hotel(current_user, hotel_id):
         raise HTTPException(403, "Access denied for this hotel.")
     h = catalog.get_hotel(hotel_id)
@@ -98,9 +144,86 @@ async def get_hotel(hotel_id: str, current_user: dict = Depends(get_current_user
     return h
 
 
+@router.get("/{hotel_id}/context")
+async def get_hotel_context(hotel_id: str, current_user: dict = Depends(get_current_user)):
+    """One-shot bundle the Ad Copy form needs to auto-fill itself: the hotel
+    record, its brand, brand+hotel USPs, and the caller's most recent
+    generations for THIS hotel. Single round-trip."""
+    if not user_can_access_hotel(current_user, hotel_id):
+        raise HTTPException(403, "Access denied for this hotel.")
+    h = catalog.get_hotel(hotel_id)
+    if not h:
+        raise HTTPException(404, "Hotel not found.")
+
+    brand = catalog.get_brand(h.get("brand_id", "")) or {}
+
+    # Pull USPs from the embedding cache (brand-level + hotel-level matches).
+    usps: list[dict] = []
+    try:
+        from backend.app.core.database import get_firestore
+        db = get_firestore()
+        # Brand-level USPs (campaign_type='brand_usp', brand_id matches, no hotel attached)
+        for d in db.collection("embedding_cache") \
+                   .where("campaign_type", "==", "brand_usp") \
+                   .where("brand_id", "==", h.get("brand_id", "")) \
+                   .limit(50).stream():
+            data = d.to_dict() or {}
+            level = "hotel" if (data.get("hotel_id") == hotel_id) else "brand"
+            if data.get("hotel_id") and data.get("hotel_id") != hotel_id:
+                continue   # USP for a different hotel
+            usp_text = data.get("description") or data.get("usp") or ""
+            if usp_text:
+                usps.append({"usp": usp_text, "level": level, "added_at": data.get("created_at", "")})
+    except Exception as exc:
+        logger.debug("USP fetch failed for hotel %s: %s", hotel_id, exc)
+
+    # Last 5 generations BY THIS USER FOR THIS HOTEL.
+    recent: list[dict] = []
+    try:
+        from backend.app.core.database import get_firestore
+        db = get_firestore()
+        # Tolerant query — drop order_by if a composite index isn't present.
+        try:
+            stream = (
+                db.collection("audit_logs")
+                .where("user_email", "==", current_user.get("sub", ""))
+                .where("hotel_name", "==", h.get("hotel_name", ""))
+                .order_by("timestamp", direction="DESCENDING")
+                .limit(5).stream()
+            )
+            docs = list(stream)
+        except Exception:
+            docs = list(
+                db.collection("audit_logs")
+                .where("user_email", "==", current_user.get("sub", ""))
+                .where("hotel_name", "==", h.get("hotel_name", ""))
+                .limit(50).stream()
+            )
+            docs.sort(key=lambda d: (d.to_dict() or {}).get("timestamp", ""), reverse=True)
+            docs = docs[:5]
+        for d in docs:
+            data = d.to_dict() or {}
+            if data.get("action") != "generate":
+                continue
+            recent.append({
+                "generation_id": data.get("generation_id", ""),
+                "offer_name": data.get("offer_name", ""),
+                "platforms": data.get("platforms", []),
+                "timestamp": data.get("timestamp", ""),
+            })
+    except Exception as exc:
+        logger.debug("Recent-generations fetch failed: %s", exc)
+
+    return {
+        "hotel": h,
+        "brand": brand,
+        "usps": usps,
+        "recent_generations": recent,
+    }
+
+
 @router.get("/brands/{brand_id}")
 async def get_brand(brand_id: str, current_user: dict = Depends(get_current_user)):
-    from backend.app.core.auth import user_can_access_brand
     role = current_user.get("role", "")
     if role != ROLE_ADMIN and not user_can_access_brand(current_user, brand_id):
         # Allow read if user has any hotel under this brand
@@ -115,6 +238,104 @@ async def get_brand(brand_id: str, current_user: dict = Depends(get_current_user
         raise HTTPException(404, "Brand not found.")
     b["hotels"] = catalog.hotels_for_brand(brand_id)
     return b
+
+
+@router.get("/brands/{brand_id}/context")
+async def get_brand_context(brand_id: str, current_user: dict = Depends(get_current_user)):
+    """One-shot context bundle for brand-level ad generation. For loyalty
+    brands (kind='loyalty') also reports the cross-chain partner pool size."""
+    role = current_user.get("role", "")
+    if role != ROLE_ADMIN and not user_can_access_brand(current_user, brand_id):
+        raise HTTPException(403, "Access denied for this brand.")
+    b = catalog.get_brand(brand_id)
+    if not b:
+        raise HTTPException(404, "Brand not found.")
+    hotels = catalog.hotels_for_brand(brand_id)
+
+    # Brand-level USPs.
+    usps: list[dict] = []
+    try:
+        from backend.app.core.database import get_firestore
+        db = get_firestore()
+        for d in db.collection("embedding_cache") \
+                   .where("campaign_type", "==", "brand_usp") \
+                   .where("brand_id", "==", brand_id) \
+                   .limit(50).stream():
+            data = d.to_dict() or {}
+            if data.get("hotel_id"):  # skip hotel-level USPs in the brand context
+                continue
+            usp_text = data.get("description") or data.get("usp") or ""
+            if usp_text:
+                usps.append({"usp": usp_text, "level": "brand", "added_at": data.get("created_at", "")})
+    except Exception as exc:
+        logger.debug("Brand USP fetch failed for %s: %s", brand_id, exc)
+
+    # Loyalty-mode cross-chain pool stats.
+    loyalty_pool: dict = {}
+    if b.get("kind") == "loyalty":
+        try:
+            from backend.app.core.database import get_firestore
+            db = get_firestore()
+            partner_brand_ids = []
+            partner_hotel_ids = []
+            for d in db.collection("brands").stream():
+                if d.id == brand_id:
+                    continue
+                if (d.to_dict() or {}).get("kind", "hotel") == "loyalty":
+                    continue
+                partner_brand_ids.append(d.id)
+            for d in db.collection("hotels").where("status", "==", "active").stream():
+                if (d.to_dict() or {}).get("brand_id") in partner_brand_ids:
+                    partner_hotel_ids.append(d.id)
+            loyalty_pool = {
+                "partner_brand_count": len(partner_brand_ids),
+                "partner_hotel_count": len(partner_hotel_ids),
+            }
+        except Exception as exc:
+            logger.debug("Loyalty pool fetch failed: %s", exc)
+
+    # Last 5 generations BY THIS USER FOR THIS BRAND.
+    recent: list[dict] = []
+    try:
+        from backend.app.core.database import get_firestore
+        db = get_firestore()
+        try:
+            docs = list(
+                db.collection("audit_logs")
+                .where("user_email", "==", current_user.get("sub", ""))
+                .where("brand_id", "==", brand_id)
+                .order_by("timestamp", direction="DESCENDING")
+                .limit(5).stream()
+            )
+        except Exception:
+            docs = list(
+                db.collection("audit_logs")
+                .where("user_email", "==", current_user.get("sub", ""))
+                .where("brand_id", "==", brand_id)
+                .limit(50).stream()
+            )
+            docs.sort(key=lambda d: (d.to_dict() or {}).get("timestamp", ""), reverse=True)
+            docs = docs[:5]
+        for d in docs:
+            data = d.to_dict() or {}
+            if data.get("action") != "generate":
+                continue
+            recent.append({
+                "generation_id": data.get("generation_id", ""),
+                "offer_name": data.get("offer_name", ""),
+                "platforms": data.get("platforms", []),
+                "timestamp": data.get("timestamp", ""),
+            })
+    except Exception as exc:
+        logger.debug("Brand recent-generations fetch failed: %s", exc)
+
+    return {
+        "brand": b,
+        "hotels": hotels,
+        "usps": usps,
+        "loyalty_pool": loyalty_pool,
+        "recent_generations": recent,
+    }
 
 
 # ──────────────────────────────────────────────────────
@@ -173,6 +394,7 @@ async def create_hotel_manual(
     hotel_name: str = Form(...),
     hotel_code: str = Form(...),
     brand_name: str = Form(...),
+    city: str = Form(""),
     rooms_count: int | None = Form(None),
     fnb_count: int | None = Form(None),
     website_url: str = Form(""),
@@ -183,6 +405,7 @@ async def create_hotel_manual(
     brand_id, _created_brand = catalog.upsert_brand(brand_name)
     row = {
         "hotel_name": hotel_name, "hotel_code": hotel_code,
+        "city": city,
         "rooms_count": rooms_count, "fnb_count": fnb_count,
         "website_url": website_url, "gmb_url": gmb_url,
     }
@@ -195,6 +418,7 @@ async def create_hotel_manual(
 @router.patch("/{hotel_id}")
 async def patch_hotel(
     hotel_id: str,
+    city: str | None = Form(None),
     rooms_count: int | None = Form(None),
     fnb_count: int | None = Form(None),
     website_url: str | None = Form(None),
@@ -207,6 +431,8 @@ async def patch_hotel(
     if not ref.get().exists:
         raise HTTPException(404, "Hotel not found.")
     update: dict = {}
+    if city is not None:
+        update["city"] = city
     if rooms_count is not None:
         update["rooms_count"] = int(rooms_count)
     if fnb_count is not None:

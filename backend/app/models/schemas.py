@@ -15,10 +15,20 @@ ROLES = (
 
 
 class ScopeAssignment(BaseModel):
-    """One row of access granted to a user. Either brand-scope OR hotel-scope, not both."""
-    scope: Literal["brand", "hotel"]
+    """One row of access granted to a user.
+
+    v2.4 — extended scopes:
+      - 'brand'  → brand_id required. brand_only=True restricts user to brand-level ops only.
+      - 'hotel'  → hotel_id required.
+      - 'city'   → city required (free-text, matches hotels.city).
+      - 'group'  → no extra fields. Grants admin-equivalent access (every brand + hotel + Club ITC).
+    """
+    scope: Literal["brand", "hotel", "city", "group"]
     brand_id: Optional[str] = None
     hotel_id: Optional[str] = None
+    city: Optional[str] = None
+    brand_only: bool = False           # only valid on scope='brand' rows
+    granted_at: Optional[str] = None
 
     @field_validator("hotel_id")
     @classmethod
@@ -28,11 +38,17 @@ class ScopeAssignment(BaseModel):
 
 
 class ScopeSummary(BaseModel):
-    """Denormalized summary for fast UI listing: '3 brands · 14 hotels'."""
+    """Denormalized summary for fast UI listing: '3 brands · 14 hotels · 2 cities'."""
     brand_count: int = 0
     hotel_count: int = 0
+    city_count: int = 0
+    has_group: bool = False
+    has_loyalty: bool = False        # true if user has access to Club ITC (loyalty brand)
     brand_names: list[str] = []      # first 3 for chip display
     hotel_names: list[str] = []      # first 3 for chip display
+    city_names: list[str] = []
+    # Pre-resolved hotel_ids the user can see across every assignment (capped at 200 for chip listing).
+    hotel_ids: list[str] = []
 
 
 class UserCreate(BaseModel):
@@ -49,6 +65,26 @@ class UserCreate(BaseModel):
     def _valid_role(cls, v):
         if v not in ROLES:
             raise ValueError(f"role must be one of {ROLES}")
+        return v
+
+    @field_validator("assignments")
+    @classmethod
+    def _validate_assignment_combos(cls, v: list[ScopeAssignment]):
+        """Per-row sanity checks. Cross-row checks (e.g. 'group must stand alone',
+        'hotel_marketing_manager has exactly 1 hotel') happen in admin.py since
+        they need access to other fields (role)."""
+        for a in v:
+            if a.scope == "brand" and not a.brand_id:
+                raise ValueError("scope='brand' requires brand_id")
+            if a.scope == "hotel" and not a.hotel_id:
+                raise ValueError("scope='hotel' requires hotel_id")
+            if a.scope == "city" and not (a.city or "").strip():
+                raise ValueError("scope='city' requires non-empty city")
+            if a.brand_only and a.scope != "brand":
+                raise ValueError("brand_only is valid only on scope='brand' rows")
+        # Group must stand alone (it implies everything).
+        if any(a.scope == "group" for a in v) and len(v) > 1:
+            raise ValueError("scope='group' must be the sole assignment")
         return v
 
 
@@ -84,16 +120,22 @@ class ContextSelector(BaseModel):
 
 # ── v2.2 Property Selection (PropertySwitcher output) ─
 class PropertySelection(BaseModel):
-    """Structured output of the cascading PropertySwitcher.
+    """Structured output of the IntelligentPropertyPicker / cascading PropertySwitcher.
 
-    scope='hotel' → single hotel ad; brand_id is denormed for retrieval filtering.
-    scope='brand' → brand-level ad; backend pulls anonymized hotel exemplars.
-    scope='multi' → set of hotels (area_manager / agency); generation_mode controls fan-out.
+    v2.4 — extended to multi-select brand_ids/cities and loyalty mode:
+      scope='hotel'   → single hotel ad; brand_id denormed for retrieval filtering.
+      scope='brand'   → brand-level ad; backend pulls anonymized hotel exemplars.
+      scope='multi'   → set of hotels and/or brands and/or cities; generation_mode controls fan-out.
+      scope='city'    → all hotels in city/cities; behaves like multi with derived hotel_ids.
+      scope='loyalty' → loyalty brand (e.g., Club ITC); RAG pulls cross-brand anonymized exemplars.
     """
-    scope: Literal["hotel", "brand", "multi"] = "hotel"
+    scope: Literal["hotel", "brand", "multi", "city", "loyalty"] = "hotel"
     hotel_id: Optional[str] = None
     brand_id: Optional[str] = None
     hotel_ids: list[str] = []
+    brand_ids: list[str] = []
+    cities: list[str] = []
+    is_loyalty: bool = False
     generation_mode: Optional[str] = None   # 'unified' | 'per_hotel' for multi-scope
 
 
@@ -103,6 +145,7 @@ class HotelIngestRow(BaseModel):
     hotel_name: str
     hotel_code: str           # unique business key — never sent to the model
     brand_name: str           # used for hierarchy + permissions, never sent to the model
+    city: Optional[str] = ""             # v2.4 — used for city-level scope; sent to the model as context
     rooms_count: Optional[int] = None    # SENT to the model so it can write '200-room property'
     fnb_count: Optional[int] = None      # SENT — '3 F&B outlets'
     website_url: Optional[str] = ""
@@ -115,6 +158,7 @@ class HotelOut(BaseModel):
     hotel_code: str
     brand_id: str
     brand_name: str
+    city: Optional[str] = ""
     rooms_count: Optional[int] = None
     fnb_count: Optional[int] = None
     website_url: Optional[str] = ""
@@ -130,6 +174,7 @@ class BrandOut(BaseModel):
     slug: str
     hotel_count: int = 0
     voice: Optional[str] = ""
+    kind: str = "hotel"               # v2.4 — 'hotel' | 'loyalty'. Loyalty brands like Club ITC sort to top of pickers.
     created_at: Optional[str] = None
 
 

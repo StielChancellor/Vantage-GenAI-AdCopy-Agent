@@ -3,7 +3,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from backend.app.core.auth import get_current_user
+from backend.app.core.auth import (
+    get_current_user, user_can_access_hotel, user_can_access_brand,
+    has_group_scope, _get_user_assignments,
+)
 from backend.app.core.database import get_firestore
 from backend.app.models.schemas import (
     AdGenerationRequest, AdGenerationResponse,
@@ -29,6 +32,77 @@ def calculate_cost_inr(model: str, input_tokens: int, output_tokens: int) -> flo
 
 
 router = APIRouter()
+
+
+@router.get("/generate/recent")
+async def get_recent_generations(
+    limit: int = 10,
+    hotel_id: str = "",
+    brand_id: str = "",
+    current_user: dict = Depends(get_current_user),
+):
+    """v2.4 — current user's last N generations, optionally filtered to a
+    specific hotel or brand. Used by the 'Last 10 generations' panel below
+    the Ad Copy form so the user can re-use a brief in one click."""
+    db = get_firestore()
+    user_email = current_user.get("sub", "")
+    if not user_email:
+        return {"generations": []}
+
+    # Resolve hotel_id → hotel_name (audit_logs is keyed by hotel_name today).
+    hotel_name = ""
+    if hotel_id:
+        try:
+            d = db.collection("hotels").document(hotel_id).get()
+            if d.exists:
+                hotel_name = (d.to_dict() or {}).get("hotel_name", "")
+        except Exception:
+            pass
+
+    try:
+        coll = db.collection("audit_logs").where("user_email", "==", user_email)
+        if hotel_name:
+            coll = coll.where("hotel_name", "==", hotel_name)
+        if brand_id:
+            coll = coll.where("brand_id", "==", brand_id)
+        try:
+            stream = coll.order_by("timestamp", direction="DESCENDING").limit(max(limit * 3, 30)).stream()
+            docs = list(stream)
+        except Exception:
+            docs = list(coll.limit(200).stream())
+            docs.sort(key=lambda d: (d.to_dict() or {}).get("timestamp", ""), reverse=True)
+    except Exception:
+        docs = []
+
+    out: list[dict] = []
+    seen_offers = set()
+    for d in docs:
+        data = d.to_dict() or {}
+        if data.get("action") != "generate":
+            continue
+        # De-dupe by (hotel_name, offer_name) keeping only the most recent.
+        key = (data.get("hotel_name", ""), data.get("offer_name", ""))
+        if key in seen_offers:
+            continue
+        seen_offers.add(key)
+        out.append({
+            "id": d.id,
+            "generation_id": data.get("generation_id", ""),
+            "hotel_name": data.get("hotel_name", ""),
+            "brand_id": data.get("brand_id", ""),
+            "offer_name": data.get("offer_name", ""),
+            "platforms": data.get("platforms", []),
+            "inclusions": data.get("inclusions", ""),
+            "reference_urls": data.get("reference_urls", []),
+            "google_listing_urls": data.get("google_listing_urls", []),
+            "campaign_objective": data.get("campaign_objective", ""),
+            "timestamp": data.get("timestamp", ""),
+            "tokens_used": int(data.get("tokens_consumed", 0)),
+            "model_used": data.get("model_used", ""),
+        })
+        if len(out) >= limit:
+            break
+    return {"generations": out}
 
 
 @router.get("/generate/url-suggestions")
@@ -63,6 +137,45 @@ async def get_url_suggestions(
     return {"suggestions": suggestions}
 
 
+def _enforce_selection_access(body: AdGenerationRequest, current_user: dict) -> None:
+    """v2.4 — gate generation on the user's role/assignments. Raises 403 on miss.
+
+    Rules:
+      - admin or 'group' grant → unrestricted
+      - selection.scope='hotel'  → user_can_access_hotel must pass on hotel_id
+      - selection.scope='brand'  → user_can_access_brand must pass on brand_id;
+        when ANY of the matching brand grants is brand_only=True, hotel-level
+        generation is rejected (i.e., the user can only do brand-level ads)
+      - selection.scope='multi'/'city' → every hotel in hotel_ids must pass user_can_access_hotel
+      - selection.scope='loyalty' → access to the loyalty brand_id required (brand check)
+    """
+    sel = body.selection
+    if sel is None:
+        return
+    if has_group_scope(current_user):
+        return
+    scope = sel.scope
+    if scope == "hotel" and sel.hotel_id:
+        if not user_can_access_hotel(current_user, sel.hotel_id):
+            raise HTTPException(403, "You don't have access to this hotel.")
+        # If only brand grants matched and they're all brand_only=True, the
+        # access helper already returned False — covered.
+        return
+    if scope == "brand" and sel.brand_id:
+        if not user_can_access_brand(current_user, sel.brand_id):
+            raise HTTPException(403, "You don't have access to this brand.")
+        return
+    if scope == "loyalty" and sel.brand_id:
+        if not user_can_access_brand(current_user, sel.brand_id):
+            raise HTTPException(403, "You don't have access to this loyalty programme.")
+        return
+    if scope in ("multi", "city"):
+        for hid in (sel.hotel_ids or []):
+            if not user_can_access_hotel(current_user, hid):
+                raise HTTPException(403, "You don't have access to one of the selected hotels.")
+        return
+
+
 @router.post("/generate", response_model=AdGenerationResponse)
 async def generate_ads(
     body: AdGenerationRequest,
@@ -70,6 +183,10 @@ async def generate_ads(
 ):
     import logging as _logging
     _gen_log = _logging.getLogger("vantage.generate")
+
+    # v2.4 — gate access before doing any work.
+    _enforce_selection_access(body, current_user)
+
     try:
         result = await generate_ad_copy(body)
     except Exception as e:
@@ -117,12 +234,16 @@ async def generate_ads(
 
     # Audit log with full details (Firestore — kept for backwards compat with legacy admin views)
     db = get_firestore()
+    sel = body.selection
     db.collection("audit_logs").add(
         {
             "user_email": current_user["sub"],
             "user_id": current_user.get("uid", ""),
             "action": "generate",
             "hotel_name": body.hotel_name,
+            "hotel_id": (sel.hotel_id if sel else "") or "",
+            "brand_id": (sel.brand_id if sel else "") or "",
+            "scope": (sel.scope if sel else "hotel"),
             "offer_name": body.offer_name,
             "platforms": body.platforms,
             "inclusions": body.inclusions,

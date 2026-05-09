@@ -28,16 +28,21 @@ async def retrieve_ad_insights(
     hotel_id: str | None = None,
     hotel_name_for_anonymize: str | None = None,
     city_for_anonymize: str | None = None,
+    is_loyalty: bool = False,
 ) -> dict:
     """Retrieve semantically relevant ad performance insights.
 
     v2.2 adds **scope** awareness so brand-level generations don't leak hotel-
     specific identity into the prompt:
 
-    - scope='hotel'  → existing v2.1 behavior; no anonymization.
-    - scope='brand'  → pull anonymized hotel exemplars (strip property names,
+    - scope='hotel'   → existing v2.1 behavior; no anonymization.
+    - scope='brand'   → pull anonymized hotel exemplars (strip property names,
        cities) so the model learns generic patterns under the brand's voice
        without parroting individual hotel facts.
+    - scope='loyalty' (v2.4, or `is_loyalty=True`) → loyalty-programme mode.
+       Pulls (a) the loyalty brand's own training, then (b) anonymized exemplars
+       from EVERY non-loyalty brand so the loyalty programme inherits chain-wide
+       voice. All cross-brand passages run through the anonymization pipeline.
     """
     query = query_context or f"Best performing ad headlines and descriptions for {hotel_name}"
 
@@ -78,20 +83,55 @@ async def retrieve_ad_insights(
             min_impression_bucket="mid",
         )
 
-    # v2.2 anonymization: when scope='brand', sanitize hotel-specific tokens.
-    if scope == "brand" and passages:
+    # v2.4 — loyalty mode: also pull cross-brand exemplars from every non-loyalty
+    # brand and anonymize them, so the loyalty programme picks up chain-wide voice.
+    cross_brand_passages: list[dict] = []
+    if (scope == "loyalty" or is_loyalty):
+        try:
+            from backend.app.core.database import get_firestore
+            db = get_firestore()
+            partner_brand_ids: list[str] = []
+            for d in db.collection("brands").stream():
+                if d.id == brand_id:
+                    continue
+                if (d.to_dict() or {}).get("kind", "hotel") == "loyalty":
+                    continue
+                partner_brand_ids.append(d.id)
+            for pbid in partner_brand_ids[:8]:   # cap fan-out
+                got = await _semantic_retrieve(
+                    query, brand_id=pbid, section_type=None,
+                    campaign_type=campaign_type, season=season,
+                    min_impression_bucket="mid",
+                )
+                cross_brand_passages.extend(got[:2])   # keep top 2 per partner
+            if cross_brand_passages:
+                cross_brand_passages = [
+                    _anonymize_passage(p, extra_terms=[]) for p in cross_brand_passages
+                ]
+        except Exception as exc:
+            logger.debug("Loyalty cross-brand retrieval failed: %s", exc)
+
+    # v2.2 anonymization: when scope='brand' or loyalty, sanitize hotel-specific tokens.
+    if scope in ("brand", "loyalty") and passages:
         hotel_tokens = []
         if hotel_name_for_anonymize:
             hotel_tokens.append(hotel_name_for_anonymize)
         if city_for_anonymize:
             hotel_tokens.append(city_for_anonymize)
-        # Also strip per-passage hotel/brand names found in metadata
         passages = [_anonymize_passage(p, extra_terms=hotel_tokens) for p in passages]
 
+    # Merge loyalty cross-brand pool AFTER anonymization of the primary set.
+    if cross_brand_passages:
+        passages = (passages or []) + cross_brand_passages
+
     if passages:
-        return _format_passages_as_insights(
+        out = _format_passages_as_insights(
             passages, campaign_type=campaign_type, season=season, scope=scope,
         )
+        if cross_brand_passages:
+            out["cross_brand_count"] = len(cross_brand_passages)
+            out["loyalty_mode"] = True
+        return out
 
     return _firestore_fallback_insights(hotel_name)
 

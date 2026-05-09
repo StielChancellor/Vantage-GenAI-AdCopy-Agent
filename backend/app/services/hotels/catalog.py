@@ -23,8 +23,17 @@ import pandas as pd
 logger = logging.getLogger("vantage.hotels.catalog")
 
 REQUIRED_COLUMNS = ["hotel_name", "hotel_code", "brand_name"]
-OPTIONAL_COLUMNS = ["rooms_count", "fnb_count", "website_url", "gmb_url"]
+OPTIONAL_COLUMNS = ["city", "rooms_count", "fnb_count", "website_url", "gmb_url"]
 ALL_KNOWN_COLUMNS = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
+
+# v2.4 — Club ITC bootstrap constants. Treat Club ITC as the apex loyalty brand.
+CLUB_ITC_BRAND_ID = "club-itc"
+CLUB_ITC_BRAND_NAME = "Club ITC"
+CLUB_ITC_DEFAULT_VOICE = (
+    "Club ITC is the loyalty programme spanning every ITC Hotel and brand. "
+    "Voice: insider, member-first, gracious. Lean on belonging, accumulated benefits, "
+    "tier progression, and the breadth of the chain — never a single property."
+)
 
 
 def slugify(text: str) -> str:
@@ -37,8 +46,12 @@ def _get_db():
     return get_firestore()
 
 
-def upsert_brand(brand_name: str) -> tuple[str, bool]:
-    """Return (brand_id, created_now). Idempotent — looks up by slug."""
+def upsert_brand(brand_name: str, *, kind: str = "hotel", voice: str = "") -> tuple[str, bool]:
+    """Return (brand_id, created_now). Idempotent — looks up by slug.
+
+    v2.4 — `kind` defaults to 'hotel'. Pass 'loyalty' for programmes like Club ITC.
+    Existing brands are not overwritten; use the dedicated `set_brand_kind` helper
+    if you need to upgrade a brand in place."""
     if not brand_name:
         raise ValueError("brand_name is required")
     db = _get_db()
@@ -52,10 +65,47 @@ def upsert_brand(brand_name: str) -> tuple[str, bool]:
         "brand_name": brand_name,
         "slug": slug,
         "hotel_count": 0,
-        "voice": "",
+        "voice": voice,
+        "kind": kind,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     return brand_id, True
+
+
+def set_brand_kind(brand_id: str, kind: str) -> bool:
+    """Promote/demote a brand's kind ('hotel' | 'loyalty'). Returns True if updated."""
+    if not brand_id or kind not in ("hotel", "loyalty"):
+        return False
+    db = _get_db()
+    ref = db.collection("brands").document(brand_id)
+    if not ref.get().exists:
+        return False
+    ref.set({"kind": kind}, merge=True)
+    return True
+
+
+def ensure_club_itc() -> str:
+    """Idempotent bootstrap. Creates Club ITC as a loyalty brand with default
+    voice if it doesn't exist. Returns its brand_id. Safe to call on every boot."""
+    db = _get_db()
+    ref = db.collection("brands").document(CLUB_ITC_BRAND_ID)
+    snap = ref.get()
+    if snap.exists:
+        # Make sure kind=loyalty even if the doc was created earlier without it.
+        cur = snap.to_dict() or {}
+        if cur.get("kind") != "loyalty":
+            ref.set({"kind": "loyalty"}, merge=True)
+        return CLUB_ITC_BRAND_ID
+    ref.set({
+        "brand_name": CLUB_ITC_BRAND_NAME,
+        "slug": CLUB_ITC_BRAND_ID,
+        "hotel_count": 0,
+        "voice": CLUB_ITC_DEFAULT_VOICE,
+        "kind": "loyalty",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    logger.info("Bootstrapped Club ITC loyalty brand")
+    return CLUB_ITC_BRAND_ID
 
 
 def upsert_hotel(row: dict, brand_id: str, brand_name: str) -> tuple[str, str]:
@@ -74,6 +124,7 @@ def upsert_hotel(row: dict, brand_id: str, brand_name: str) -> tuple[str, str]:
         "hotel_code": hotel_code,
         "brand_id": brand_id,
         "brand_name": brand_name,
+        "city": (row.get("city") or "").strip(),
         "rooms_count": _safe_int(row.get("rooms_count")),
         "fnb_count": _safe_int(row.get("fnb_count")),
         "website_url": (row.get("website_url") or "").strip(),
@@ -230,45 +281,115 @@ def list_brands(*, allowed_brand_ids: list[str] | None = None) -> list[dict]:
     return rows
 
 
-def search_scope(q: str, limit: int = 20) -> list[dict]:
-    """Free-flowing typeahead — returns flat list of brand+hotel matches.
-    Each row is `{type:'brand'|'hotel', id, label, brand_id?, brand_name?}`.
-    Brand rows surface first when names match equally."""
-    if not q:
-        return []
-    q_lower = q.lower()
+def search_scope(q: str, limit: int = 20, *, include_empty: bool = False) -> list[dict]:
+    """Free-flowing typeahead — returns flat list of brand + hotel + city matches.
+
+    Each row is one of:
+      {type:'brand', id, label, kind, hotel_count}
+      {type:'hotel', id, label, brand_id, brand_name, hotel_code, city}
+      {type:'city',  id (=city slug), label (=city), hotel_count}
+
+    Loyalty brands (kind='loyalty') always sort to the very top. When
+    `include_empty=True`, an empty query still returns the loyalty brands +
+    every brand alphabetically — used for the "show me everything I can pick"
+    initial dropdown render."""
+    q_lower = (q or "").lower()
     db = _get_db()
     out: list[dict] = []
+    loyalty_rows: list[dict] = []
+    brand_rows: list[dict] = []
+    hotel_rows: list[dict] = []
+    city_counts: dict[str, int] = {}
 
-    # Brands first — small collection, scan it
+    # Brands — small collection, scan it
     for d in db.collection("brands").stream():
         data = d.to_dict() or {}
-        if q_lower in (data.get("brand_name", "") + " " + data.get("slug", "")).lower():
-            out.append({
-                "type": "brand",
-                "id": d.id,
-                "label": data.get("brand_name", ""),
-                "hotel_count": int(data.get("hotel_count", 0)),
-            })
-            if len(out) >= limit:
-                break
+        kind = data.get("kind", "hotel")
+        haystack = (data.get("brand_name", "") + " " + data.get("slug", "")).lower()
+        if include_empty and not q_lower:
+            matched = True
+        else:
+            matched = bool(q_lower) and (q_lower in haystack)
+        if not matched:
+            continue
+        row = {
+            "type": "brand",
+            "id": d.id,
+            "label": data.get("brand_name", ""),
+            "kind": kind,
+            "hotel_count": int(data.get("hotel_count", 0)),
+        }
+        if kind == "loyalty":
+            loyalty_rows.append(row)
+        else:
+            brand_rows.append(row)
 
-    # Hotels — also scan; small enough at this stage. Caller can narrow with brand_id later.
+    # Hotels — also scan; small enough at this stage. Also accumulate city counts
+    # so we can surface matching city rows in the same response.
     for d in db.collection("hotels").where("status", "==", "active").stream():
         data = d.to_dict() or {}
-        if q_lower in (data.get("hotel_name", "") + " " + data.get("hotel_code", "")).lower():
-            out.append({
+        city = (data.get("city") or "").strip()
+        if city:
+            city_counts[city] = city_counts.get(city, 0) + 1
+        if not q_lower:
+            continue
+        haystack = (
+            data.get("hotel_name", "") + " " + data.get("hotel_code", "") + " " + city
+        ).lower()
+        if q_lower in haystack:
+            hotel_rows.append({
                 "type": "hotel",
                 "id": d.id,
                 "label": data.get("hotel_name", ""),
                 "brand_id": data.get("brand_id", ""),
                 "brand_name": data.get("brand_name", ""),
                 "hotel_code": data.get("hotel_code", ""),
+                "city": city,
             })
-            if len(out) >= limit:
-                break
 
+    city_rows = []
+    if q_lower:
+        for city, count in sorted(city_counts.items()):
+            if q_lower in city.lower():
+                city_rows.append({
+                    "type": "city",
+                    "id": slugify(city),
+                    "label": city,
+                    "hotel_count": count,
+                })
+
+    # Final ordering: loyalty brands first, then matching cities, then hotel brands, then hotels.
+    loyalty_rows.sort(key=lambda r: r["label"])
+    brand_rows.sort(key=lambda r: r["label"])
+    hotel_rows.sort(key=lambda r: r["label"])
+    out = loyalty_rows + city_rows + brand_rows + hotel_rows
     return out[:limit]
+
+
+def list_cities() -> list[dict]:
+    """Return distinct hotel cities with hotel counts. Cheap O(N) scan since the
+    hotel collection is small at this stage."""
+    db = _get_db()
+    counts: dict[str, int] = {}
+    for d in db.collection("hotels").where("status", "==", "active").stream():
+        city = ((d.to_dict() or {}).get("city") or "").strip()
+        if not city:
+            continue
+        counts[city] = counts.get(city, 0) + 1
+    return [{"city": c, "hotel_count": n} for c, n in sorted(counts.items())]
+
+
+def hotels_for_city(city: str) -> list[dict]:
+    if not city:
+        return []
+    db = _get_db()
+    docs = list(
+        db.collection("hotels")
+        .where("status", "==", "active")
+        .where("city", "==", city)
+        .stream()
+    )
+    return [{"hotel_id": d.id, **(d.to_dict() or {})} for d in docs]
 
 
 def soft_delete_hotel(hotel_id: str) -> bool:

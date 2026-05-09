@@ -52,32 +52,52 @@ router = APIRouter()
 
 
 def _validate_assignments(role: str, assignments: list[ScopeAssignment]) -> None:
-    """Reject role↔assignment combinations the data model doesn't allow."""
+    """Reject role↔assignment combinations the data model doesn't allow.
+
+    v2.4 — adds 'group' (full access) and 'city' scopes:
+      - 'group' is admin-equivalent. It must stand alone and is allowed only
+        for agency / brand_manager / admin (admin already short-circuits).
+      - 'city' grants are allowed for area_manager (city-of-hotels) and agency.
+    """
     if role == "admin":
         return  # admin assignments are ignored — they have everything
+
+    # Group scope must stand alone.
+    has_group = any(a.scope == "group" for a in assignments)
+    if has_group:
+        if len(assignments) != 1:
+            raise HTTPException(400, "scope='group' must be the sole assignment.")
+        if role not in (ROLE_AGENCY, ROLE_BRAND_MANAGER):
+            raise HTTPException(400, "scope='group' requires role agency or brand_manager (or admin).")
+        return
+
     if role == ROLE_HOTEL_MM:
         if len(assignments) != 1 or assignments[0].scope != "hotel":
             raise HTTPException(400, "hotel_marketing_manager must have exactly 1 hotel assignment.")
     if role == ROLE_BRAND_MANAGER:
-        # Brand managers are brand-scoped only
+        # Brand managers may have brand + city; never raw hotel-only.
         for a in assignments:
-            if a.scope != "brand":
-                raise HTTPException(400, "brand_manager assignments must be brand-scoped only.")
+            if a.scope not in ("brand", "city"):
+                raise HTTPException(400, "brand_manager assignments must be brand- or city-scoped.")
     if role == ROLE_AREA_MANAGER:
-        # Area managers are hotel-scoped only (no brand-level access)
+        # Area managers are hotel- or city-scoped (no brand-level access).
         for a in assignments:
-            if a.scope != "hotel":
-                raise HTTPException(400, "area_manager assignments must be hotel-scoped only.")
+            if a.scope not in ("hotel", "city"):
+                raise HTTPException(400, "area_manager assignments must be hotel- or city-scoped.")
     if not role_allows_multi_hotel(role) and sum(1 for a in assignments if a.scope == "hotel") > 1:
         raise HTTPException(400, f"Role '{role}' cannot have more than one hotel.")
-    # Field-level — every assignment carries the right id
+
     for a in assignments:
         if a.scope == "brand" and not a.brand_id:
             raise HTTPException(400, "brand_id required on brand-scope assignments.")
         if a.scope == "hotel" and not a.hotel_id:
             raise HTTPException(400, "hotel_id required on hotel-scope assignments.")
+        if a.scope == "city" and not (a.city or "").strip():
+            raise HTTPException(400, "city required on city-scope assignments.")
         if a.scope == "brand" and not role_allows_brand_scope(role):
             raise HTTPException(400, f"Role '{role}' cannot hold brand-scope assignments.")
+        if a.brand_only and a.scope != "brand":
+            raise HTTPException(400, "brand_only=True is valid only on brand-scope assignments.")
 
 
 def _write_assignments(uid: str, assignments: list[ScopeAssignment]) -> None:
@@ -93,6 +113,8 @@ def _write_assignments(uid: str, assignments: list[ScopeAssignment]) -> None:
             "scope": a.scope,
             "brand_id": a.brand_id or None,
             "hotel_id": a.hotel_id or None,
+            "city": (a.city or None) if a.scope == "city" else None,
+            "brand_only": bool(a.brand_only) if a.scope == "brand" else False,
             "granted_at": datetime.now(timezone.utc).isoformat(),
         }
         items_ref.add(item)
@@ -100,25 +122,60 @@ def _write_assignments(uid: str, assignments: list[ScopeAssignment]) -> None:
 
 
 def _build_scope_summary(assignments: list[ScopeAssignment]) -> ScopeSummary:
-    """Resolve assignment IDs back to display names so the UI can chip them."""
+    """Resolve assignment IDs back to display names so the UI can chip them.
+
+    v2.4 — also tracks city scope, group scope, loyalty access, and the flat
+    hotel-id list (capped) the user can see. Used by the IntelligentPropertyPicker
+    to skip the picker entirely when the user has only one accessible entity."""
     brand_names: list[str] = []
     hotel_names: list[str] = []
+    city_names: list[str] = []
+    has_group = False
+    has_loyalty = False
     db = get_firestore()
     for a in assignments:
+        if a.scope == "group":
+            has_group = True
+            continue
         if a.scope == "brand" and a.brand_id:
             d = db.collection("brands").document(a.brand_id).get()
             if d.exists:
-                brand_names.append((d.to_dict() or {}).get("brand_name", ""))
+                bdata = d.to_dict() or {}
+                brand_names.append(bdata.get("brand_name", ""))
+                if bdata.get("kind") == "loyalty":
+                    has_loyalty = True
         elif a.scope == "hotel" and a.hotel_id:
             d = db.collection("hotels").document(a.hotel_id).get()
             if d.exists:
                 hotel_names.append((d.to_dict() or {}).get("hotel_name", ""))
+        elif a.scope == "city" and a.city:
+            city_names.append(a.city)
+    # Count expansion: brand grants implicitly include their hotels, so the
+    # hotel_count below is the *direct* hotel grants only — picker uses this
+    # to decide whether to render the static-chip mode.
     return ScopeSummary(
         brand_count=len(brand_names),
         hotel_count=len(hotel_names),
+        city_count=len(city_names),
+        has_group=has_group,
+        has_loyalty=has_loyalty,
         brand_names=brand_names[:3],
         hotel_names=hotel_names[:3],
+        city_names=city_names[:3],
     )
+
+
+def _safe_assignment(d: dict) -> dict:
+    """Defensively coerce a Firestore-stored assignment doc into the v2.4 shape.
+    Older docs may be missing 'city'/'brand_only'; treat them as defaults."""
+    return {
+        "scope": d.get("scope") or "hotel",
+        "brand_id": d.get("brand_id"),
+        "hotel_id": d.get("hotel_id"),
+        "city": d.get("city"),
+        "brand_only": bool(d.get("brand_only", False)),
+        "granted_at": d.get("granted_at"),
+    }
 
 
 def _user_to_out(uid: str, data: dict, assignments: list[dict] | None = None) -> UserOut:
@@ -131,7 +188,7 @@ def _user_to_out(uid: str, data: dict, assignments: list[dict] | None = None) ->
             assignments = [a.to_dict() for a in items]
         except Exception:
             assignments = []
-    summary = _build_scope_summary([ScopeAssignment(**a) for a in assignments]) if assignments else ScopeSummary()
+    summary = _build_scope_summary([ScopeAssignment(**_safe_assignment(a)) for a in assignments]) if assignments else ScopeSummary()
     return UserOut(
         uid=uid,
         full_name=data.get("full_name", ""),

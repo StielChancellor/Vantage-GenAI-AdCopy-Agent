@@ -54,6 +54,18 @@ app.include_router(events.router, prefix=settings.API_V1_PREFIX, tags=["Events"]
 app.include_router(crm.router, prefix=settings.API_V1_PREFIX, tags=["CRM"])
 app.include_router(copilot.router, prefix=settings.API_V1_PREFIX, tags=["Copilot"])
 
+
+@app.on_event("startup")
+async def _bootstrap_club_itc():
+    """v2.4 — make sure the Club ITC loyalty brand exists. Idempotent."""
+    try:
+        from backend.app.services.hotels.catalog import ensure_club_itc
+        ensure_club_itc()
+    except Exception:
+        # Never block startup on bootstrap; log and continue.
+        import logging
+        logging.getLogger("vantage.startup").exception("Club ITC bootstrap failed")
+
 # Serve React frontend static files in production
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 if FRONTEND_DIR.exists():

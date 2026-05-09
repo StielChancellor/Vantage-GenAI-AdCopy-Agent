@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
-import { generateAds, refineAds, getUrlSuggestions, placesAutocomplete } from '../services/api';
+import {
+  generateAds, refineAds, getUrlSuggestions, placesAutocomplete,
+  getMe, getHotelContext, getBrandContext,
+} from '../services/api';
 import toast from 'react-hot-toast';
 import AdResults from '../components/AdResults';
 import GenerationProgress from '../components/GenerationProgress';
-import ContextSelector, { getHotelNameFromContext, isContextValid } from '../components/ContextSelector';
+import IntelligentPropertyPicker from '../components/IntelligentPropertyPicker';
+import RecentGenerations from '../components/RecentGenerations';
 import { Zap, X, Plus, Sparkles } from 'lucide-react';
 import CopilotChat from '../components/CopilotChat';
 
@@ -20,12 +24,11 @@ const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
 
 export default function Dashboard() {
   const [viewMode, setViewMode] = useState('builder');
-  const [context, setContext] = useState({
-    context_type: 'single_property',
-    property_names: [],
-    destination_name: '',
-    generation_mode: 'unified',
-  });
+  // v2.4 — IntelligentPropertyPicker selection (replaces ContextSelector).
+  const [selection, setSelection] = useState(null);
+  const [scopeSummary, setScopeSummary] = useState(null);
+  const [autoFilledKeys, setAutoFilledKeys] = useState(new Set());
+
   const [form, setForm] = useState({
     offer_name: '',
     inclusions: '',
@@ -52,6 +55,103 @@ export default function Dashboard() {
 
   // Refinement
   const [refining, setRefining] = useState(false);
+
+  // v2.4 — fetch fresh scope_summary so the picker can render the right UX.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await getMe();
+        setScopeSummary(r.data?.scope_summary || null);
+      } catch {
+        setScopeSummary(null);
+      }
+    })();
+  }, []);
+
+  // v2.4 — auto-fill the form when the user picks exactly one hotel or brand.
+  useEffect(() => {
+    if (!selection) return;
+    const onlyHotel =
+      (selection.hotel_ids?.length || 0) === 1 &&
+      (selection.brand_ids?.length || 0) === 0 &&
+      (selection.cities?.length || 0) === 0;
+    const onlyBrand =
+      (selection.brand_ids?.length || 0) === 1 &&
+      (selection.hotel_ids?.length || 0) === 0 &&
+      (selection.cities?.length || 0) === 0;
+
+    let cancelled = false;
+    (async () => {
+      const filled = new Set();
+      try {
+        if (onlyHotel) {
+          const r = await getHotelContext(selection.hotel_ids[0]);
+          if (cancelled) return;
+          const h = r.data?.hotel || {};
+          const nextForm = {};
+          if (h.website_url) {
+            nextForm.reference_urls = Array.from(new Set([...(form.reference_urls || []), h.website_url]));
+            filled.add('reference_urls');
+          }
+          if (h.gmb_url) {
+            // Listing entries are objects with a google_url field — map to that shape.
+            const already = (form.google_listing_urls || []).some((p) => p.google_url === h.gmb_url);
+            if (!already) {
+              nextForm.google_listing_urls = [
+                ...(form.google_listing_urls || []),
+                {
+                  name: h.hotel_name || 'Listing',
+                  place_id: h.gmb_place_id || '',
+                  google_url: h.gmb_url,
+                  rating: '',
+                  review_count: 0,
+                  address: h.city || '',
+                },
+              ];
+              filled.add('google_listing_urls');
+            }
+          }
+          // Build a friendly Other Information line if blank.
+          if (!form.other_info) {
+            const bits = [];
+            if (h.rooms_count) bits.push(`${h.rooms_count}-room property`);
+            if (h.fnb_count) bits.push(`${h.fnb_count} F&B outlet${h.fnb_count !== 1 ? 's' : ''}`);
+            if (h.city) bits.push(`${h.city}`);
+            if (bits.length) {
+              nextForm.other_info = bits.join(' · ');
+              filled.add('other_info');
+            }
+          }
+          if (Object.keys(nextForm).length) {
+            setForm((prev) => ({ ...prev, ...nextForm }));
+          }
+        } else if (onlyBrand) {
+          const r = await getBrandContext(selection.brand_ids[0]);
+          if (cancelled) return;
+          const b = r.data?.brand || {};
+          const isLoyalty = b.kind === 'loyalty';
+          if (isLoyalty) {
+            // Loyalty mode — clear hotel-specific fields and lock with a flag-y line.
+            setForm((prev) => ({
+              ...prev,
+              other_info: prev.other_info || (b.voice || `Loyalty programme: ${b.brand_name}`),
+              google_listing_urls: [],
+            }));
+            filled.add('other_info');
+          } else if (b.voice && !form.other_info) {
+            setForm((prev) => ({ ...prev, other_info: b.voice }));
+            filled.add('other_info');
+          }
+        }
+      } catch {
+        /* best-effort auto-fill; keep existing values on error */
+      }
+      if (!cancelled && filled.size) setAutoFilledKeys(filled);
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection?.hotel_ids?.[0], selection?.brand_ids?.[0]]);
 
   // v2.3 keyboard shortcuts: ⌘⏎ generate, ⌘K toggle copilot
   useEffect(() => {
@@ -185,10 +285,47 @@ export default function Dashboard() {
     }));
   };
 
+  // v2.4 — derive hotel_name + selection payload from the IntelligentPropertyPicker state.
+  const buildHotelName = () => {
+    if (!selection) return '';
+    if ((selection._labels?.hotels?.length || 0) === 1) return selection._labels.hotels[0].label;
+    if ((selection._labels?.brands?.length || 0) === 1) return selection._labels.brands[0].label;
+    if ((selection._labels?.cities?.length || 0) === 1) return selection._labels.cities[0].label;
+    // Multi: comma-join labels for the audit log.
+    const all = [
+      ...(selection._labels?.brands || []).map((b) => b.label),
+      ...(selection._labels?.hotels || []).map((h) => h.label),
+      ...(selection._labels?.cities || []).map((c) => c.label),
+    ];
+    return all.join(', ');
+  };
+
+  const isSelectionValid = () => {
+    if (!selection) return false;
+    return (
+      (selection.hotel_ids?.length || 0) +
+      (selection.brand_ids?.length || 0) +
+      (selection.cities?.length || 0)
+    ) > 0;
+  };
+
+  const buildSelectionPayload = () => {
+    if (!selection) return undefined;
+    return {
+      scope: selection.scope || 'hotel',
+      hotel_id: selection.hotel_ids?.[0] || '',
+      brand_id: selection.brand_ids?.[0] || '',
+      hotel_ids: selection.hotel_ids || [],
+      brand_ids: selection.brand_ids || [],
+      cities: selection.cities || [],
+      is_loyalty: !!selection.is_loyalty,
+    };
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!isContextValid(context)) {
-      toast.error('Please fill in the property/destination name');
+    if (!isSelectionValid()) {
+      toast.error('Pick a hotel, brand, or city to start.');
       return;
     }
     if (form.reference_urls.length === 0) {
@@ -202,11 +339,11 @@ export default function Dashboard() {
     setLoading(true);
     setResult(null);
     try {
-      const hotelName = getHotelNameFromContext(context);
+      const hotelName = buildHotelName();
       const payload = {
         ...form,
         hotel_name: hotelName,
-        context,
+        selection: buildSelectionPayload(),
         google_listing_urls: form.google_listing_urls.map(p => p.google_url || ''),
         carousel_mode: form.platforms.includes('fb_carousel') ? carouselMode : undefined,
         carousel_cards: form.platforms.includes('fb_carousel') && carouselMode === 'manual'
@@ -227,7 +364,7 @@ export default function Dashboard() {
     setRefining(true);
     try {
       const payload = {
-        hotel_name: getHotelNameFromContext(context),
+        hotel_name: buildHotelName(),
         offer_name: form.offer_name,
         inclusions: form.inclusions,
         platforms: form.platforms,
@@ -246,6 +383,26 @@ export default function Dashboard() {
     } finally {
       setRefining(false);
     }
+  };
+
+  // v2.4 — repopulate the form fields from a recent generation row.
+  const handleReuseBrief = (row) => {
+    if (!row) return;
+    const platforms = (row.platforms && row.platforms.length) ? row.platforms : form.platforms;
+    setForm((prev) => ({
+      ...prev,
+      offer_name: row.offer_name || prev.offer_name,
+      inclusions: row.inclusions || prev.inclusions,
+      reference_urls: row.reference_urls?.length ? row.reference_urls : prev.reference_urls,
+      campaign_objective: row.campaign_objective || prev.campaign_objective,
+      platforms,
+    }));
+    toast.success('Brief restored — review and generate.');
+    // Scroll back to the form.
+    requestAnimationFrame(() => {
+      const el = document.querySelector('form.campaign-form');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   };
 
   return (
@@ -268,7 +425,19 @@ export default function Dashboard() {
         <>
         <div className="page-centered">
           <form className="campaign-form" onSubmit={handleSubmit}>
-            <ContextSelector value={context} onChange={setContext} />
+            <div className="form-group">
+              <label>Property / Brand / City *</label>
+              <IntelligentPropertyPicker
+                value={selection}
+                onChange={setSelection}
+                scopeSummary={scopeSummary}
+              />
+              {selection?.is_loyalty && (
+                <p style={{ fontSize: 12, color: 'var(--em-accent, #c8331e)', marginTop: 6 }}>
+                  Loyalty mode — ads will draw on chain-wide voice (anonymized exemplars from every partner brand). GMB and per-property fields are ignored.
+                </p>
+              )}
+            </div>
 
             <div className="form-row">
               <div className="form-group">
@@ -440,6 +609,16 @@ export default function Dashboard() {
             <AdResults data={result} form={form} onRefine={handleRefine} refining={refining} />
           </div>
         )}
+
+        {/* v2.4 — Pick up where you left off */}
+        <div className="page-centered">
+          <RecentGenerations
+            hotelId={selection?.hotel_ids?.[0] || ''}
+            brandId={selection?.brand_ids?.[0] || ''}
+            limit={10}
+            onReuse={handleReuseBrief}
+          />
+        </div>
         </>
       )}
     </>
