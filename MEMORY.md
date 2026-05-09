@@ -1,7 +1,61 @@
 # Vantage GenAI — Memory
 
 A running record of where the project is. Read this first when picking the
-work back up. Last updated: 2026-05-07 (App v2.3, post-unification patch).
+work back up. Last updated: 2026-05-09 (App v2.4).
+
+## v2.4 — Intelligent Ad Copy Builder + Club ITC + Chain/City Hierarchy (2026-05-09)
+
+- **Club ITC** is now bootstrapped on every backend startup as a
+  `kind='loyalty'` brand at `brands/club-itc`. `services/hotels/catalog.py:ensure_club_itc()`
+  runs in the FastAPI startup hook. Loyalty brands sort to the top of the
+  PropertySwitcher and trigger cross-brand RAG.
+- **Cross-brand training for loyalty brands.** When the resolved brand has
+  `kind='loyalty'` (or `is_loyalty=True` is set in `PropertySelection`),
+  `services/rag_engine.retrieve_ad_insights()` pulls top exemplars from every
+  non-loyalty brand and pushes them through `_anonymize_passage` before
+  merging with the loyalty brand's own training. `ad_generator` skips per-property
+  attributes and GMB review fetch in this mode and injects a `## LOYALTY
+  PROGRAMME CONTEXT` block.
+- **City as a new RBAC + scope level.** `hotels.city` is an optional CSV
+  column; `ScopeAssignment.scope='city'` grants access to every hotel in that
+  city. New `/hotels/cities` endpoint feeds the admin city-chip add-on.
+- **Group scope.** `ScopeAssignment.scope='group'` is admin-equivalent without
+  the admin role. Must stand alone. `core/auth.has_group_scope()` short-circuits
+  every access helper.
+- **brand_only flag.** A brand-scope grant with `brand_only=True` restricts the
+  user to brand-level ops only — they cannot access individual hotels under
+  that brand. Enforced in `auth.user_can_access_hotel` and
+  `routers/generate._enforce_selection_access`.
+- **IntelligentPropertyPicker** (`frontend/src/components/IntelligentPropertyPicker.jsx`)
+  replaces ContextSelector on the Ad Copy form. Role-aware:
+  - 1 hotel scope → static chip (no picker).
+  - Multiple hotels → typeahead opens dropdown of every accessible hotel with checkboxes.
+  - Mixed brands/cities/Club ITC → typeahead with grouped sections (Loyalty,
+    Cities, Brands, Hotels) and independent checkboxes.
+  - Auto-fetches `/hotels/scope-search?include_empty=true` to pre-pick the
+    user's only entity.
+  - Emits `{scope, hotel_ids, brand_ids, cities, is_loyalty, _labels}`.
+- **Auto-fill in Dashboard.** On selection of one hotel: GMB url, website url,
+  rooms/F&B/city summary auto-populate (with the existing "Remembered" pill).
+  On selection of one brand: brand voice fills Other Information. Loyalty
+  picks lock GMB and rooms/F&B fields.
+- **Recent generations panel.** New `<RecentGenerations>` below the form;
+  filtered by current `hotel_id` / `brand_id`. Each row has a "Re-use brief"
+  button that repopulates the form from the audit row (offer_name, inclusions,
+  reference_urls, platforms, campaign_objective). Powered by `/generate/recent`.
+- **Five admin grant presets** in `UserForm.jsx`:
+  1. Brand only (`brand_only=true`)
+  2. All hotels in brand (`brand_only=false`)
+  3. Brand + few hotels
+  4. Club ITC only
+  5. Complete group access
+  Plus a separate City multi-chip add-on layered on top of any non-group preset.
+  Hotels-only preset retained for area_managers + hotel_marketing_managers.
+- **Cloud Build invocation reminder.** `cloudbuild.yaml` references
+  `$COMMIT_SHA`; manual submits must pass it explicitly via
+  `--substitutions=COMMIT_SHA=manual-<ts>` (still required as of v2.4).
+
+## v2.3.1 hotfix (2026-05-07)
 
 ## v2.3.1 hotfix (2026-05-07)
 
