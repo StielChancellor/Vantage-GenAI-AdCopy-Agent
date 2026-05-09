@@ -607,9 +607,14 @@ should be about arrival/welcome, NOT about spa or dining.
 Generate exactly 5 card suggestions, 5 matching headlines, and 5 matching descriptions — all aligned by index."""
 
     # v2.1: Historical exemplars — typed, scored, season-filtered.
+    # NOTE (v2.4 hotfix): `primary_ct` was a stale reference to a local in
+    # generate_ad_copy() and was raising NameError on every generate call.
+    # Recompute the scope campaign type from the request's platforms inline
+    # so this builder is self-contained.
     historical_context = ""
     exemplars = (ad_insights or {}).get("exemplars") or []
-    scope_ct = (ad_insights or {}).get("scope_campaign_type") or primary_ct or "all types"
+    _scope_ct_default = _primary_campaign_type(getattr(request, "platforms", []) or [])
+    scope_ct = (ad_insights or {}).get("scope_campaign_type") or _scope_ct_default or "all types"
     scope_season = (ad_insights or {}).get("scope_season") or "any season"
 
     if exemplars:

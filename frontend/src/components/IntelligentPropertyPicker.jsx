@@ -333,7 +333,12 @@ export default function IntelligentPropertyPicker({
       {open && (
         <div className="em-switcher-results">
           {loading && <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--em-ink-soft)' }}>Searching…</div>}
-          {!loading && results.length === 0 && (
+          {!loading
+            && results.length === 0
+            && grouped.loyalty.length === 0
+            && grouped.cities.length === 0
+            && grouped.brands.length === 0
+            && grouped.hotels.length === 0 && (
             <div style={{ padding: '12px', fontSize: 12, color: 'var(--em-ink-soft)' }}>
               {q ? 'No matches in your scope.' : 'Start typing to filter, or browse the list…'}
             </div>

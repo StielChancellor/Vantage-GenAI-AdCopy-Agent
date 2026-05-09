@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { login } from '../services/api';
 import toast from 'react-hot-toast';
+import { APP_VERSION } from '../version';
 
 
 // ─── SPACE CANVAS (stars + shooting stars, mouse-reactive twinkling) ──────────
@@ -1415,7 +1416,7 @@ export default function LandingPage() {
           <div className="lp-hero-content">
             <div className="lp-badge">
               <div className="lp-badge-dot" />
-              Omnichannel AI Agent · v2.6
+              Omnichannel AI Agent · v{APP_VERSION}
             </div>
 
             <h1 className="lp-hero-title">
@@ -1645,7 +1646,7 @@ export default function LandingPage() {
           <div className="lp-section-header">
             <div className="lp-docs-eyebrow">
               <div className="lp-docs-status-dot" />
-              SYSTEM STATUS: VERSION 2.6
+              SYSTEM STATUS: VERSION {APP_VERSION}
             </div>
             <h2 className="lp-section-title">
               Enterprise-grade infrastructure.<br />Zero maintenance.
