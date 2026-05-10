@@ -214,11 +214,92 @@ async def get_hotel_context(hotel_id: str, current_user: dict = Depends(get_curr
     except Exception as exc:
         logger.debug("Recent-generations fetch failed: %s", exc)
 
+    # v2.4 — fetch real GMB rating + review_count if we have a place_id (or
+    # resolve one via Find Place). Cache the result back on the hotel doc so
+    # subsequent /context calls are instant.
+    gmb: dict = {}
+    try:
+        place_id = (h.get("gmb_place_id") or "").strip()
+        cached_count = h.get("gmb_review_count")
+        cached_rating = h.get("gmb_rating")
+        cached_at = h.get("gmb_details_at", "")
+        # Use the cache for 24 h to avoid hammering Places API.
+        from datetime import datetime, timezone, timedelta
+        cache_fresh = False
+        if cached_at:
+            try:
+                cache_fresh = (datetime.now(timezone.utc) - datetime.fromisoformat(cached_at)) < timedelta(hours=24)
+            except Exception:
+                cache_fresh = False
+
+        if cached_count is not None and cache_fresh:
+            gmb = {
+                "place_id": place_id,
+                "rating": cached_rating or 0,
+                "review_count": int(cached_count or 0),
+                "google_url": h.get("gmb_url", ""),
+                "name": h.get("hotel_name", ""),
+                "address": h.get("city", ""),
+            }
+        else:
+            # Live fetch via the existing Places autocomplete + details path.
+            from backend.app.core.config import get_settings as _gs
+            import httpx as _httpx
+            _s = _gs()
+            api_key = _s.GOOGLE_PLACES_API_KEY
+            if api_key:
+                async with _httpx.AsyncClient(timeout=10) as client:
+                    if not place_id and h.get("hotel_name"):
+                        # Resolve place_id by hotel name first.
+                        ac = await client.get(
+                            "https://maps.googleapis.com/maps/api/place/autocomplete/json",
+                            params={
+                                "input": h["hotel_name"],
+                                "types": "establishment",
+                                "key": api_key,
+                            },
+                        )
+                        preds = (ac.json() or {}).get("predictions", [])
+                        if preds:
+                            place_id = preds[0].get("place_id", "")
+                    if place_id:
+                        det = await client.get(
+                            "https://maps.googleapis.com/maps/api/place/details/json",
+                            params={
+                                "place_id": place_id,
+                                "fields": "name,formatted_address,rating,user_ratings_total,url,place_id",
+                                "key": api_key,
+                            },
+                        )
+                        r = (det.json() or {}).get("result", {}) or {}
+                        gmb = {
+                            "place_id": place_id,
+                            "rating": float(r.get("rating") or 0),
+                            "review_count": int(r.get("user_ratings_total") or 0),
+                            "google_url": r.get("url") or h.get("gmb_url", ""),
+                            "name": r.get("name") or h.get("hotel_name", ""),
+                            "address": r.get("formatted_address") or h.get("city", ""),
+                        }
+                        # Persist back so future calls are cheap.
+                        try:
+                            from backend.app.core.database import get_firestore as _gfs
+                            _gfs().collection("hotels").document(hotel_id).set({
+                                "gmb_place_id": place_id,
+                                "gmb_rating": gmb["rating"],
+                                "gmb_review_count": gmb["review_count"],
+                                "gmb_details_at": datetime.now(timezone.utc).isoformat(),
+                            }, merge=True)
+                        except Exception:
+                            pass
+    except Exception as exc:
+        logger.debug("GMB details fetch failed for hotel %s: %s", hotel_id, exc)
+
     return {
         "hotel": h,
         "brand": brand,
         "usps": usps,
         "recent_generations": recent,
+        "gmb": gmb,
     }
 
 

@@ -97,18 +97,25 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "role": current_user.get("role", "user"),
     }
     try:
-        return _user_to_out(uid, data or fallback_data)
+        out = _user_to_out(uid, data or fallback_data)
+        # v2.5 — admins always see their own token visibility, even if the per-user
+        # flags happen to be off. This keeps the My Account billing table populated.
+        if (out.role or "").lower() == "admin":
+            out.show_token_count = True
+            out.show_token_amount = True
+        return out
     except Exception as exc:  # noqa: BLE001
         # Never let scope-summary errors break /auth/me.
         from backend.app.models.schemas import UserOut, ScopeSummary
         d = data or fallback_data
+        is_admin = (d.get("role") or "").lower() == "admin"
         return UserOut(
             uid=uid,
             full_name=d.get("full_name", ""),
             email=d.get("email", ""),
             role=d.get("role", "user"),
-            show_token_count=bool(d.get("show_token_count", False)),
-            show_token_amount=bool(d.get("show_token_amount", False)),
+            show_token_count=is_admin or bool(d.get("show_token_count", False)),
+            show_token_amount=is_admin or bool(d.get("show_token_amount", False)),
             scope_summary=ScopeSummary(),
             created_at=d.get("created_at"),
         )
@@ -117,13 +124,18 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 @router.get("/auth/me/billing")
 async def get_my_billing(current_user: dict = Depends(get_current_user)):
     """Per-user billing summary, gated by show_token_count/show_token_amount.
-    Returns redacted "—" markers for users whose admin disabled visibility."""
+    Returns redacted "—" markers for users whose admin disabled visibility.
+
+    v2.5 — admins always see their own consumption regardless of the per-user
+    flags (the flags are intended to gate non-admin reports, not the admin's
+    own usage view)."""
     db = get_firestore()
     uid = current_user.get("uid", "")
     user_doc = db.collection("users").document(uid).get() if uid else None
     user_data = (user_doc.to_dict() or {}) if (user_doc and user_doc.exists) else {}
-    show_count = bool(user_data.get("show_token_count", False))
-    show_amount = bool(user_data.get("show_token_amount", False))
+    is_admin = current_user.get("role") == "admin"
+    show_count = is_admin or bool(user_data.get("show_token_count", False))
+    show_amount = is_admin or bool(user_data.get("show_token_amount", False))
 
     rows = []
     total_tokens = 0

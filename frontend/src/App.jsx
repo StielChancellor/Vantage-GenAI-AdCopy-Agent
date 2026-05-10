@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { SelectionProvider } from './contexts/SelectionContext';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
@@ -61,8 +62,10 @@ export default function App() {
     <BrowserRouter>
       <ThemeProvider>
         <AuthProvider>
-          <Toaster position="top-right" />
-          <AppRoutes />
+          <SelectionProvider>
+            <Toaster position="top-right" />
+            <AppRoutes />
+          </SelectionProvider>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

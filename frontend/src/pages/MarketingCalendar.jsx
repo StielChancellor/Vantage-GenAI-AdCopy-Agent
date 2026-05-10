@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useSelection } from '../contexts/SelectionContext';
 
 const CHANNELS = [
   { id: 'google_search', label: 'Google Search', match: ['google_search'] },
@@ -57,9 +58,20 @@ function channelFor(platforms = []) {
 
 export default function MarketingCalendar() {
   const navigate = useNavigate();
+  const { selection } = useSelection();
   const [billing, setBilling] = useState(null);
   const [now] = useState(new Date());
   const [activeQ, setActiveQ] = useState(quarterFor(new Date()));
+  // v2.5 — view-mode + group-value dropdowns.
+  // Default sensibly based on the shared selection.
+  const defaultGroupBy = (() => {
+    if (selection?.is_loyalty) return 'loyalty';
+    if ((selection?.brand_ids?.length || 0) > 0) return 'brand';
+    if ((selection?.hotel_ids?.length || 0) > 0) return 'property';
+    return 'property';
+  })();
+  const [groupBy, setGroupBy] = useState(defaultGroupBy);   // 'property' | 'campaign' | 'brand' | 'loyalty'
+  const [groupValue, setGroupValue] = useState('');         // selected specific property / campaign / brand
 
   useEffect(() => {
     api.get('/auth/me/billing').then((r) => setBilling(r.data)).catch(() => setBilling({ rows: [] }));
@@ -68,12 +80,48 @@ export default function MarketingCalendar() {
   const year = now.getFullYear();
   const weeks = useMemo(() => quarterWeeks(activeQ, year), [activeQ, year]);
 
+  // v2.5 — pre-filter audit rows by the active selection + group-value.
+  const filteredRows = useMemo(() => {
+    if (!billing?.rows) return [];
+    let rows = billing.rows;
+    // Honor shared selection first.
+    if (selection?.is_loyalty || groupBy === 'loyalty') {
+      rows = rows.filter((r) => (r.scope === 'loyalty') || (r.brand_id === 'club-itc'));
+    } else {
+      const hotelLabels = (selection?._labels?.hotels || []).map((h) => h.label);
+      const brandIds = (selection?.brand_ids || []);
+      if (hotelLabels.length || brandIds.length) {
+        rows = rows.filter((r) =>
+          (hotelLabels.length && hotelLabels.includes(r.hotel_name))
+          || (brandIds.length && brandIds.includes(r.brand_id))
+        );
+      }
+    }
+    // Honor the group-value drill-down.
+    if (groupValue) {
+      if (groupBy === 'property') rows = rows.filter((r) => r.hotel_name === groupValue);
+      else if (groupBy === 'campaign') rows = rows.filter((r) => r.offer_name === groupValue);
+      else if (groupBy === 'brand') rows = rows.filter((r) => r.brand_id === groupValue);
+    }
+    return rows;
+  }, [billing, selection, groupBy, groupValue]);
+
+  // Distinct group values to populate the second dropdown.
+  const groupValues = useMemo(() => {
+    if (!billing?.rows) return [];
+    const set = new Set();
+    for (const r of billing.rows) {
+      if (groupBy === 'property' && r.hotel_name) set.add(r.hotel_name);
+      else if (groupBy === 'campaign' && r.offer_name) set.add(r.offer_name);
+      else if (groupBy === 'brand' && r.brand_id) set.add(r.brand_id);
+    }
+    return [...set].sort();
+  }, [billing, groupBy]);
+
   const events = useMemo(() => {
     const map = {};
     for (const ch of CHANNELS) map[ch.id] = {};
-    if (!billing?.rows) return map;
-
-    for (const r of billing.rows) {
+    for (const r of filteredRows) {
       const ts = new Date(r.timestamp || '');
       if (Number.isNaN(ts.getTime())) continue;
       const ch = channelFor(r.platforms);
@@ -84,7 +132,7 @@ export default function MarketingCalendar() {
       map[ch][w].push(r);
     }
     return map;
-  }, [billing, weeks]);
+  }, [filteredRows, weeks]);
 
   const hasAnyEvents = Object.values(events).some((wkmap) => Object.keys(wkmap).length > 0);
 
@@ -113,7 +161,47 @@ export default function MarketingCalendar() {
         </div>
         <span style={{ color: 'var(--em-ink-faint)', fontSize: 12 }}>·</span>
         <span className="em-chip">{quarterLabel(activeQ, year)}</span>
-        <span className="em-chip">All channels</span>
+
+        {/* v2.5 — view-mode dropdown */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--em-ink-soft)' }}>
+          View by
+          <select
+            value={groupBy}
+            onChange={(e) => { setGroupBy(e.target.value); setGroupValue(''); }}
+            style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--em-line)', background: 'var(--em-surface)', fontSize: 12 }}
+          >
+            <option value="property">Property</option>
+            <option value="campaign">Campaign</option>
+            <option value="brand">Brand</option>
+            <option value="loyalty">Club ITC (Loyalty)</option>
+          </select>
+        </label>
+
+        {/* v2.5 — drill-down to a specific value */}
+        {groupBy !== 'loyalty' && groupValues.length > 0 && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--em-ink-soft)' }}>
+            Pick {groupBy}
+            <select
+              value={groupValue}
+              onChange={(e) => setGroupValue(e.target.value)}
+              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--em-line)', background: 'var(--em-surface)', fontSize: 12, maxWidth: 220 }}
+            >
+              <option value="">All ({groupValues.length})</option>
+              {groupValues.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {(selection?._labels?.hotels?.length || selection?._labels?.brands?.length || selection?.is_loyalty) ? (
+          <span className="em-pill accent" style={{ fontSize: 11 }}>
+            scope: {selection?.is_loyalty ? 'Club ITC'
+              : (selection?._labels?.brands?.[0]?.label || selection?._labels?.hotels?.map((h) => h.label).join(', ').slice(0, 40))}
+          </span>
+        ) : (
+          <span className="em-chip muted">All scope</span>
+        )}
       </div>
 
       <div className="em-cal-shell">

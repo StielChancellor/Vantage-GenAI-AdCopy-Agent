@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+import { useSelection } from '../contexts/SelectionContext';
 import IntelligentPropertyPicker from '../components/IntelligentPropertyPicker';
 
 const TOOLS = [
@@ -39,7 +40,12 @@ export default function Hub() {
   const [billing, setBilling] = useState(null);
   const [recents, setRecents] = useState([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerSelection, setPickerSelection] = useState(null);
+  // Bind the modal picker to the shared SelectionContext so opening the modal
+  // pre-shows the user's current selection and confirming pushes the change
+  // into Ad Copy / CRM / Marketing without an extra hop.
+  const { selection: sharedSelection, setSelection: setSharedSelection } = useSelection();
+  const [pickerSelection, setPickerSelection] = useState(sharedSelection);
+  useEffect(() => { setPickerSelection(sharedSelection); }, [sharedSelection]);
 
   useEffect(() => {
     (async () => {
@@ -179,6 +185,7 @@ export default function Hub() {
                   className="em-btn primary"
                   onClick={() => {
                     setPickerOpen(false);
+                    setSharedSelection(pickerSelection);
                     navigate('/adcopy', { state: { selection: pickerSelection } });
                   }}
                   disabled={
@@ -272,8 +279,23 @@ export default function Hub() {
           <div className="em-panel">
             <h5>Property memory <span className="em-mono-label">↻ remembered</span></h5>
             <div style={{ display: 'grid', gap: 8 }}>
-              <Mem label="Brands" value={me?.scope_summary?.brand_count ?? 0} />
-              <Mem label="Hotels" value={me?.scope_summary?.hotel_count ?? 0} />
+              {(() => {
+                const isAdminish = user?.role === 'admin' || me?.scope_summary?.has_group;
+                const brandVal = isAdminish ? 'All' : (me?.scope_summary?.brand_count ?? 0);
+                const hotelVal = isAdminish ? 'All' : (me?.scope_summary?.hotel_count ?? 0);
+                return (
+                  <>
+                    <Mem label="Brands" value={brandVal} />
+                    <Mem label="Hotels" value={hotelVal} />
+                    {me?.scope_summary?.city_count > 0 && (
+                      <Mem label="Cities" value={me.scope_summary.city_count} />
+                    )}
+                    {me?.scope_summary?.has_loyalty && (
+                      <Mem label="Loyalty" value="Club ITC" />
+                    )}
+                  </>
+                );
+              })()}
               <Mem label="Past briefs" value={billing?.rows?.length ?? 0} />
               <Mem label="Token visibility" value={me?.show_token_count ? 'visible' : 'hidden'} />
             </div>

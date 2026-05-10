@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { generateCRM, refineCRM, searchEvents, exportCRMCalendar, placesAutocomplete } from '../services/api';
+import {
+  generateCRM, refineCRM, searchEvents, exportCRMCalendar, placesAutocomplete,
+  getMe, getHotelContext, getBrandContext,
+} from '../services/api';
+import { useSelection } from '../contexts/SelectionContext';
 import toast from 'react-hot-toast';
 import CRMResults from '../components/CRMResults';
 import CalendarView from '../components/CalendarView';
 import GenerationProgress from '../components/GenerationProgress';
-import ContextSelector, { getHotelNameFromContext, isContextValid } from '../components/ContextSelector';
+import IntelligentPropertyPicker from '../components/IntelligentPropertyPicker';
 import ChannelFrequency from '../components/ChannelFrequency';
 import EventCalendar from '../components/EventCalendar';
 import { Zap, X, Plus, Search, ChevronRight, ChevronLeft, Calendar, MessageSquare, Sparkles } from 'lucide-react';
@@ -44,16 +49,22 @@ const STEPS = [
 
 export default function CRMWizard() {
   const { user } = useAuth();
+  const location = useLocation();
   const [viewMode, setViewMode] = useState('builder');
   const [step, setStep] = useState(1);
 
-  // Step 1: Context & Channel
-  const [context, setContext] = useState({
-    context_type: 'single_property',
-    property_names: [],
-    destination_name: '',
-    generation_mode: 'unified',
-  });
+  // Step 1: Identity — v2.5 reads from the shared SelectionContext so the
+  // hotel/brand picked on Ad Copy is already here, and any change propagates back.
+  const { selection, setSelection } = useSelection();
+  const [scopeSummary, setScopeSummary] = useState(null);
+  // Generation fan-out mode (mirrors Ad Copy: 'unified' | 'per_entity').
+  const [fanoutMode, setFanoutMode] = useState('unified');
+
+  // Honor a selection passed via router state on mount.
+  useEffect(() => {
+    if (location.state?.selection && !selection) setSelection(location.state.selection);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [channels, setChannels] = useState([]);
   const [campaignType, setCampaignType] = useState('promotional');
   const [referenceUrls, setReferenceUrls] = useState([]);
@@ -102,6 +113,116 @@ export default function CRMWizard() {
     }, 400);
     return () => clearTimeout(timer);
   }, [placeQuery]);
+
+  // v2.4 — fetch scope_summary so the picker can render the right UX.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await getMe();
+        setScopeSummary(r.data?.scope_summary || null);
+      } catch { setScopeSummary(null); }
+    })();
+  }, []);
+
+  // v2.4 — auto-fill on selection (mirrors Ad Copy form behaviour).
+  useEffect(() => {
+    if (!selection) return;
+    const hotelIds = selection.hotel_ids || [];
+    const brandIds = selection.brand_ids || [];
+    const onlyBrandsNoHotels = brandIds.length === 1 && hotelIds.length === 0 && (selection.cities?.length || 0) === 0;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        if (hotelIds.length > 0) {
+          const responses = await Promise.allSettled(hotelIds.map((id) => getHotelContext(id)));
+          if (cancelled) return;
+          const newRefUrls = [];
+          const newListings = [];
+          const summaryBits = [];
+          for (const res of responses) {
+            if (res.status !== 'fulfilled') continue;
+            const h = res.value.data?.hotel || {};
+            const gmb = res.value.data?.gmb || {};
+            if (h.website_url) newRefUrls.push(h.website_url);
+            if (gmb.google_url || h.gmb_url) {
+              newListings.push({
+                name: gmb.name || h.hotel_name || 'Listing',
+                place_id: gmb.place_id || h.gmb_place_id || '',
+                google_url: gmb.google_url || h.gmb_url,
+                rating: gmb.rating || '',
+                review_count: gmb.review_count || 0,
+                address: gmb.address || h.city || '',
+              });
+            }
+            const bits = [];
+            if (h.rooms_count) bits.push(`${h.rooms_count}-room`);
+            if (h.fnb_count) bits.push(`${h.fnb_count} F&B`);
+            if (h.city) bits.push(h.city);
+            if (bits.length) summaryBits.push(`${h.hotel_name}: ${bits.join(' · ')}`);
+          }
+          setReferenceUrls((prev) => Array.from(new Set([...(prev || []), ...newRefUrls])));
+          setGoogleListings((prev) => {
+            const seen = new Set((prev || []).map((p) => p.google_url));
+            return [...(prev || []), ...newListings.filter((l) => l.google_url && !seen.has(l.google_url))];
+          });
+          if (!otherInfo && summaryBits.length) setOtherInfo(summaryBits.join(' · '));
+        } else if (onlyBrandsNoHotels) {
+          const r = await getBrandContext(brandIds[0]);
+          if (cancelled) return;
+          const b = r.data?.brand || {};
+          if (b.kind === 'loyalty' && !otherInfo) {
+            setOtherInfo(b.voice || `Loyalty programme: ${b.brand_name}`);
+          } else if (b.voice && !otherInfo) {
+            setOtherInfo(b.voice);
+          }
+        }
+      } catch { /* best-effort */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    (selection?.hotel_ids || []).join(','),
+    (selection?.brand_ids || []).join(','),
+    (selection?.cities || []).join(','),
+  ]);
+
+  // v2.4 — derive hotel_name + selection payload mirrors Ad Copy.
+  const buildHotelName = () => {
+    if (!selection) return '';
+    if ((selection._labels?.hotels?.length || 0) === 1) return selection._labels.hotels[0].label;
+    if ((selection._labels?.brands?.length || 0) === 1) return selection._labels.brands[0].label;
+    if ((selection._labels?.cities?.length || 0) === 1) return selection._labels.cities[0].label;
+    const all = [
+      ...(selection._labels?.brands || []).map((b) => b.label),
+      ...(selection._labels?.hotels || []).map((h) => h.label),
+      ...(selection._labels?.cities || []).map((c) => c.label),
+    ];
+    return all.join(', ');
+  };
+  const isSelectionValid = () => !!selection && (
+    (selection.hotel_ids?.length || 0)
+    + (selection.brand_ids?.length || 0)
+    + (selection.cities?.length || 0)
+  ) > 0;
+  const needsFanoutPrompt = () => !!selection && (
+    (selection.hotel_ids?.length || 0)
+    + (selection.brand_ids?.length || 0)
+    + (selection.cities?.length || 0)
+  ) > 1;
+  const buildSelectionPayload = () => {
+    if (!selection) return undefined;
+    return {
+      scope: selection.scope || 'hotel',
+      hotel_id: selection.hotel_ids?.[0] || '',
+      brand_id: selection.brand_ids?.[0] || '',
+      hotel_ids: selection.hotel_ids || [],
+      brand_ids: selection.brand_ids || [],
+      cities: selection.cities || [],
+      is_loyalty: !!selection.is_loyalty,
+      generation_mode: needsFanoutPrompt() ? fanoutMode : undefined,
+    };
+  };
 
   const toggleChannel = (id) => {
     setChannels((prev) => prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]);
@@ -160,10 +281,10 @@ export default function CRMWizard() {
     setResult(null);
     setStep(5);
     try {
-      const hotelName = getHotelNameFromContext(context);
+      const hotelName = buildHotelName();
       const payload = {
         hotel_name: hotelName,
-        context,
+        selection: buildSelectionPayload(),
         channels,
         campaign_type: campaignType,
         target_audience: targetAudience,
@@ -194,7 +315,7 @@ export default function CRMWizard() {
     setRefining(true);
     try {
       const res = await refineCRM({
-        hotel_name: getHotelNameFromContext(context),
+        hotel_name: buildHotelName(),
         channels,
         previous_content: result.content,
         previous_calendar: result.calendar,
@@ -227,7 +348,7 @@ export default function CRMWizard() {
 
   const canProceed = () => {
     switch (step) {
-      case 1: return isContextValid(context) && channels.length > 0;
+      case 1: return isSelectionValid() && channels.length > 0;
       case 2: return targetAudience.trim() && offerDetails.trim();
       case 3: return true; // Events are optional
       case 4: return scheduleStart && scheduleEnd;
@@ -235,7 +356,7 @@ export default function CRMWizard() {
     }
   };
 
-  const hotelName = getHotelNameFromContext(context);
+  const hotelName = buildHotelName();
 
   return (
     <>
@@ -271,7 +392,34 @@ export default function CRMWizard() {
             <section className="wizard-panel">
               <h2>Identity & Channel Selection</h2>
 
-              <ContextSelector value={context} onChange={setContext} />
+              <div className="form-group">
+                <label>Property / Brand / City *</label>
+                <IntelligentPropertyPicker
+                  value={selection}
+                  onChange={setSelection}
+                  scopeSummary={scopeSummary}
+                />
+                {selection?.is_loyalty && (
+                  <p style={{ fontSize: 12, color: 'var(--em-accent, #c8331e)', marginTop: 6 }}>
+                    Loyalty mode — CRM messages will adopt chain-wide voice (anonymized exemplars). Per-property fields are ignored.
+                  </p>
+                )}
+                {needsFanoutPrompt() && (
+                  <div className="form-group" style={{ marginTop: 8 }}>
+                    <label>Generation mode</label>
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                      <label className="radio-label" style={{ flex: '1 1 240px' }}>
+                        <input type="radio" name="crm-fanout" value="unified" checked={fanoutMode === 'unified'} onChange={() => setFanoutMode('unified')} />
+                        Unified (single brand)
+                      </label>
+                      <label className="radio-label" style={{ flex: '1 1 240px' }}>
+                        <input type="radio" name="crm-fanout" value="per_entity" checked={fanoutMode === 'per_entity'} onChange={() => setFanoutMode('per_entity')} />
+                        Per-Property (separate)
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div className="form-group" style={{ marginTop: '1rem' }}>
                 <label>Channels *</label>

@@ -4,6 +4,7 @@ import {
   generateAds, refineAds, getUrlSuggestions, placesAutocomplete,
   getMe, getHotelContext, getBrandContext,
 } from '../services/api';
+import { useSelection } from '../contexts/SelectionContext';
 import toast from 'react-hot-toast';
 import AdResults from '../components/AdResults';
 import GenerationProgress from '../components/GenerationProgress';
@@ -25,11 +26,16 @@ const OBJECTIVES = ['', 'Awareness', 'Consideration', 'Conversion'];
 
 export default function Dashboard() {
   const location = useLocation();
+  const { selection, setSelection } = useSelection();
   const [viewMode, setViewMode] = useState('builder');
-  // v2.4 — IntelligentPropertyPicker selection (replaces ContextSelector).
-  // Honor a selection passed via router state (e.g., from the Hub's "Switch
-  // property / brand" modal).
-  const [selection, setSelection] = useState(() => location.state?.selection || null);
+
+  // v2.5 — if router state carries a selection (e.g., from the Hub modal),
+  // push it into the shared SelectionContext on mount so every other page
+  // sees it too.
+  useEffect(() => {
+    if (location.state?.selection && !selection) setSelection(location.state.selection);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [scopeSummary, setScopeSummary] = useState(null);
   const [autoFilledKeys, setAutoFilledKeys] = useState(new Set());
 
@@ -105,15 +111,17 @@ export default function Dashboard() {
           for (const res of responses) {
             if (res.status !== 'fulfilled') continue;
             const h = res.value.data?.hotel || {};
+            const gmb = res.value.data?.gmb || {};
             if (h.website_url) newRefUrls.push(h.website_url);
-            if (h.gmb_url) {
+            // Prefer the live GMB record (with real rating + review_count) when present.
+            if (gmb.google_url || h.gmb_url) {
               newListings.push({
-                name: h.hotel_name || 'Listing',
-                place_id: h.gmb_place_id || '',
-                google_url: h.gmb_url,
-                rating: '',
-                review_count: 0,
-                address: h.city || '',
+                name: gmb.name || h.hotel_name || 'Listing',
+                place_id: gmb.place_id || h.gmb_place_id || '',
+                google_url: gmb.google_url || h.gmb_url,
+                rating: gmb.rating || '',
+                review_count: gmb.review_count || 0,
+                address: gmb.address || h.city || '',
               });
             }
             const bits = [];
