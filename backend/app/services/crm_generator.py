@@ -86,8 +86,12 @@ async def generate_crm_content(request: CRMGenerateRequest) -> CRMGenerateRespon
     # Training directives (global — no hotel_name filter)
     directives = get_training_directives()
 
-    # Brand USPs
-    brand_data = get_brand_usps(request.hotel_name)
+    # Brand USPs (rag_engine.get_brand_usps is async — must await; otherwise
+    # brand_data ends up as a coroutine and downstream .get() raises 500.)
+    try:
+        brand_data = await get_brand_usps(request.hotel_name)
+    except Exception:
+        brand_data = None
 
     # 2. Build prompts
     system_prompt = _build_crm_system_prompt(request.channels, brand_data)
