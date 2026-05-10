@@ -589,9 +589,22 @@ export default function CRMWizard() {
                 </div>
               </div>
 
-              <button className="btn btn-primary" onClick={handleSearchEvents} disabled={searchingEvents}>
-                <Search size={16} /> {searchingEvents ? 'Searching...' : 'Search Events'}
-              </button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button className="btn btn-primary" onClick={handleSearchEvents} disabled={searchingEvents}>
+                  <Search size={16} /> {searchingEvents ? 'Searching...' : 'Search Events'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => { setSelectedEvents([]); setEventResults([]); setStep(4); }}
+                  title="Skip event search and continue"
+                >
+                  Skip events <ChevronRight size={14} />
+                </button>
+                <span style={{ fontSize: 12, color: 'var(--em-ink-soft, #595650)' }}>
+                  Events are optional — skip to schedule the campaign without them.
+                </span>
+              </div>
 
               {/* Event results — Calendar/Timeline toggle */}
               {eventResults.length > 0 && (
@@ -701,6 +714,16 @@ export default function CRMWizard() {
                 </button>
               )}
               <div className="wizard-nav-spacer" />
+              {step === 3 && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => { setSelectedEvents([]); setEventResults([]); setStep(4); }}
+                  style={{ marginRight: 8 }}
+                >
+                  Skip events
+                </button>
+              )}
               {step < 4 ? (
                 <button className="btn btn-primary" onClick={() => setStep(step + 1)} disabled={!canProceed()}>
                   Next <ChevronRight size={16} />
