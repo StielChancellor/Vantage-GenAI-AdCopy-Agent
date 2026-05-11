@@ -13,7 +13,7 @@ from backend.app.core.version import APP_VERSION
 from backend.app.middleware.request_logger import RequestLoggingMiddleware
 from backend.app.routers import (
     auth, admin, generate, health, places, training, events, crm, copilot,
-    hotels, knowledge,
+    hotels, knowledge, campaigns,
 )
 
 settings = get_settings()
@@ -53,6 +53,7 @@ app.include_router(training.router, prefix=settings.API_V1_PREFIX, tags=["Traini
 app.include_router(events.router, prefix=settings.API_V1_PREFIX, tags=["Events"])
 app.include_router(crm.router, prefix=settings.API_V1_PREFIX, tags=["CRM"])
 app.include_router(copilot.router, prefix=settings.API_V1_PREFIX, tags=["Copilot"])
+app.include_router(campaigns.router, prefix=settings.API_V1_PREFIX, tags=["Campaigns"])
 
 
 @app.on_event("startup")

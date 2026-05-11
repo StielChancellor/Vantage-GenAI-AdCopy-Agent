@@ -118,6 +118,23 @@ export const generateCRM = (data) => api.post('/crm/generate', data);
 export const refineCRM = (data) => api.post('/crm/refine', data);
 export const exportCRMCalendar = (data) => api.post('/crm/export-calendar', data, { responseType: 'blob' });
 
+// Unified Campaigns (v2.6)
+export const structureCampaign = (data) => api.post('/campaigns/structure', data);
+export const createCampaign = (data) => api.post('/campaigns', data);
+export const lockCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(id)}/lock`);
+export const unlockCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(id)}/unlock`);
+export const archiveCampaign = (id) => api.post(`/campaigns/${encodeURIComponent(id)}/archive`);
+export const listCampaigns = (params = {}) => {
+  const q = new URLSearchParams();
+  if (params.status) q.append('status', params.status);
+  if (params.limit) q.append('limit', String(params.limit));
+  const qs = q.toString();
+  return api.get(`/campaigns${qs ? '?' + qs : ''}`);
+};
+export const getCampaign = (id) => api.get(`/campaigns/${encodeURIComponent(id)}`);
+export const patchCampaign = (id, data) => api.patch(`/campaigns/${encodeURIComponent(id)}`, data);
+export const generateCampaign = (id, data) => api.post(`/campaigns/${encodeURIComponent(id)}/generate`, data, { timeout: 600000 });
+
 // Copilot
 export const copilotChat = (data) => api.post('/copilot/chat', data);
 export const saveBrief = (data) => api.post('/copilot/briefs/save', data);

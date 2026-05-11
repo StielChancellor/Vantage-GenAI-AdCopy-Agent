@@ -30,7 +30,7 @@ const TOOLS = [
     chip: 'Q view ready', to: '/calendar' },
   { id: 'unified', num: '04 / Tool', icon: Zap, title: 'Unified Campaign',
     blurb: 'One brief, fanned out: ads & CRM together, sequenced. Choose channels later.',
-    chip: 'New', to: '/adcopy', featured: true },
+    chip: 'New', to: '/unified', featured: true },
 ];
 
 export default function Hub() {
@@ -80,10 +80,28 @@ export default function Hub() {
 
   const firstName = (user?.full_name || '').split(' ')[0] || '';
 
-  // Identity selection: prefer the first assigned hotel/brand for the greeting.
-  const identityName = (me?.scope_summary?.hotel_names?.[0])
-    || (me?.scope_summary?.brand_names?.[0])
-    || (user?.role === 'admin' ? 'All workspaces' : 'No property assigned');
+  // v2.6 — Identity strip: prefer the shared SelectionContext (what the user
+  // actually picked, possibly across tools). Fall back to first assigned
+  // hotel/brand, then "All workspaces" for admins / "No property assigned" otherwise.
+  const identityName = (() => {
+    const hotels = sharedSelection?._labels?.hotels || [];
+    const brands = sharedSelection?._labels?.brands || [];
+    const cities = sharedSelection?._labels?.cities || [];
+    if (sharedSelection?.is_loyalty) return 'Club ITC';
+    if (hotels.length === 1 && brands.length === 0 && cities.length === 0) return hotels[0].label;
+    if (brands.length === 1 && hotels.length === 0 && cities.length === 0) return brands[0].label;
+    const total = hotels.length + brands.length + cities.length;
+    if (total > 1) {
+      return `${total} entities · ${[
+        hotels.length && `${hotels.length} hotel${hotels.length !== 1 ? 's' : ''}`,
+        brands.length && `${brands.length} brand${brands.length !== 1 ? 's' : ''}`,
+        cities.length && `${cities.length} cit${cities.length !== 1 ? 'ies' : 'y'}`,
+      ].filter(Boolean).join(' · ')}`;
+    }
+    return (me?.scope_summary?.hotel_names?.[0])
+      || (me?.scope_summary?.brand_names?.[0])
+      || (user?.role === 'admin' ? 'All workspaces' : 'No property assigned');
+  })();
 
   return (
     <div className="em-scope" style={{ padding: '8px 4px 32px' }}>

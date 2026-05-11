@@ -14,6 +14,7 @@ import HotelsIngestion from './pages/admin/HotelsIngestion';
 import KnowledgeBase from './pages/admin/KnowledgeBase';
 import Hub from './pages/Hub';
 import MarketingCalendar from './pages/MarketingCalendar';
+import UnifiedCampaign from './pages/UnifiedCampaign';
 import './styles/editorial-mono.css';
 
 function ProtectedRoute({ children }) {
@@ -44,6 +45,7 @@ function AppRoutes() {
         <Route path="/adcopy" element={<Dashboard />} />
         <Route path="/crm" element={<CRMWizard />} />
         <Route path="/calendar" element={<MarketingCalendar />} />
+        <Route path="/unified" element={<UnifiedCampaign />} />
         <Route path="/account" element={<MyAccount />} />
         <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
         <Route path="/admin/hotels" element={<RequireAdmin><HotelsIngestion /></RequireAdmin>} />

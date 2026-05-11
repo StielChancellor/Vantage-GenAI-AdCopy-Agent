@@ -37,6 +37,10 @@ export default function AppLayout() {
             <Home size={18} />
             <span>Home</span>
           </NavLink>
+          <NavLink to="/unified" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+            <Zap size={18} />
+            <span>Unified Campaign</span>
+          </NavLink>
           <NavLink to="/adcopy" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Megaphone size={18} />
             <span>Ad Copy</span>

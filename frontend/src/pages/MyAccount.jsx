@@ -5,15 +5,54 @@
  * fields; we render "—" in their place.
  */
 import { useEffect, useState } from 'react';
-import api from '../services/api';
+import { useNavigate } from 'react-router-dom';
+import api, { listCampaigns, archiveCampaign, unlockCampaign } from '../services/api';
 import { APP_VERSION, APP_VERSION_DATE } from '../version';
+import toast from 'react-hot-toast';
 
 export default function MyAccount() {
+  const navigate = useNavigate();
   const [me, setMe] = useState(null);
   const [billing, setBilling] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg] = useState('');
   const [tab, setTab] = useState('profile');
+  const [campaigns, setCampaigns] = useState([]);
+  const [campaignsLoading, setCampaignsLoading] = useState(false);
+
+  const loadCampaigns = async () => {
+    setCampaignsLoading(true);
+    try {
+      const r = await listCampaigns({ limit: 100 });
+      setCampaigns(r.data || []);
+    } catch {
+      setCampaigns([]);
+    } finally {
+      setCampaignsLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (tab === 'unified-briefs') loadCampaigns();
+  }, [tab]);
+
+  const editCampaign = async (c) => {
+    try {
+      if (c.status === 'locked') await unlockCampaign(c.id);
+      navigate(`/unified?campaign=${encodeURIComponent(c.id)}`);
+    } catch {
+      toast.error('Could not open campaign for edit.');
+    }
+  };
+  const doArchive = async (c) => {
+    if (!window.confirm(`Archive "${c.structured?.campaign_name || 'this campaign'}"?`)) return;
+    try {
+      await archiveCampaign(c.id);
+      toast.success('Archived.');
+      loadCampaigns();
+    } catch {
+      toast.error('Archive failed.');
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -57,8 +96,13 @@ export default function MyAccount() {
         </p>
       </div>
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        {[['profile', 'Profile'], ['properties', 'Properties & brands'], ['billing', 'Billing & usage']].map(([k, label]) => (
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {[
+          ['profile', 'Profile'],
+          ['properties', 'Properties & brands'],
+          ['billing', 'Billing & usage'],
+          ['unified-briefs', 'Unified Briefs'],
+        ].map(([k, label]) => (
           <button key={k} type="button" className="em-mode-card" aria-selected={tab === k} onClick={() => setTab(k)}>
             <div className="t">{label}</div>
           </button>
@@ -163,6 +207,65 @@ export default function MyAccount() {
           </table>
           {billing.rows.length === 0 && (
             <p style={{ fontSize: 13, color: 'var(--em-ink-soft)', marginTop: 12 }}>No generations yet.</p>
+          )}
+        </div>
+      )}
+
+      {tab === 'unified-briefs' && (
+        <div className="em-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+            <div>
+              <div className="em-mono-label">Unified Briefs</div>
+              <p style={{ fontSize: 13, color: 'var(--em-ink-soft)', marginTop: 4 }}>
+                Locked campaigns are immutable until you unlock them. Editing a locked brief flips it back to draft.
+              </p>
+            </div>
+            <button className="btn btn-primary" onClick={() => navigate('/unified')}>+ New campaign</button>
+          </div>
+          {campaignsLoading ? (
+            <p style={{ fontSize: 13, color: 'var(--em-ink-soft)' }}>Loading…</p>
+          ) : campaigns.length === 0 ? (
+            <p style={{ fontSize: 13, color: 'var(--em-ink-soft)' }}>
+              No campaigns yet — start one with the button above.
+            </p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--em-line)', textAlign: 'left' }}>
+                  <th className="em-mono-label">Name</th>
+                  <th className="em-mono-label">Status</th>
+                  <th className="em-mono-label">Dates</th>
+                  <th className="em-mono-label">Generations</th>
+                  <th className="em-mono-label">Last edited</th>
+                  <th className="em-mono-label"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {campaigns.map((c) => (
+                  <tr key={c.id} style={{ borderBottom: '1px solid var(--em-line)' }}>
+                    <td style={{ padding: '6px 4px', fontWeight: 600 }}>
+                      {c.structured?.campaign_name || '(untitled)'}
+                    </td>
+                    <td>
+                      <span className={`em-pill ${c.status === 'locked' ? 'accent' : c.status === 'archived' ? 'muted' : ''}`}>
+                        {c.status}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--em-ink-soft)' }}>
+                      {(c.structured?.start_date || '—')} → {(c.structured?.end_date || '—')}
+                    </td>
+                    <td>{(c.generated || []).length}</td>
+                    <td style={{ color: 'var(--em-ink-soft)' }}>{(c.updated_at || '').slice(0, 10)}</td>
+                    <td style={{ display: 'flex', gap: 6, padding: '6px 4px' }}>
+                      <button className="btn btn-sm btn-outline" onClick={() => editCampaign(c)}>Edit</button>
+                      {c.status !== 'archived' && (
+                        <button className="btn btn-sm btn-outline" onClick={() => doArchive(c)}>Archive</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       )}

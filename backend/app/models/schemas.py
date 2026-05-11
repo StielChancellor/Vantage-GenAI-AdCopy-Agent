@@ -411,3 +411,106 @@ class SavedBrief(BaseModel):
     name: str = ""
     brief: dict = {}
     created_at: Optional[str] = None
+
+
+# ── Unified Campaigns (v2.6) ──────────────────────────
+class UnifiedCampaignBrief(BaseModel):
+    """Step-1 input — the user's free-form brief + any reference URLs.
+    The brief can mention campaign name / dates / inclusions / promo /
+    target audience in any order; the structurer normalises it."""
+    raw_brief: str
+    reference_urls: list[str] = []
+
+
+class StructuredHotel(BaseModel):
+    hotel_id: Optional[str] = None
+    hotel_name: str
+
+
+class StructuredCampaign(BaseModel):
+    """Step-2 output of the Gemini structurer; user-editable in the
+    finalization page. campaign_name is the only required field — every
+    other slot is best-effort."""
+    campaign_name: str
+    start_date: Optional[str] = ""
+    end_date: Optional[str] = ""
+    booking_window_start: Optional[str] = ""
+    booking_window_end: Optional[str] = ""
+    cancellation_policy: Optional[str] = ""
+    inclusions: Optional[str] = ""
+    promo_code: Optional[str] = ""
+    landing_page_url: Optional[str] = ""
+    participating_hotels: list[StructuredHotel] = []
+    brand_ids: list[str] = []
+    cities: list[str] = []
+    target_audience: Optional[str] = ""
+    summary: Optional[str] = ""
+
+
+class UnifiedCampaignSelection(BaseModel):
+    """Step-4 selection — extends PropertySelection with campaign-level
+    + channel choices for the orchestrator's fan-out."""
+    scope: Literal["hotel", "brand", "multi", "city", "loyalty"] = "multi"
+    hotel_id: Optional[str] = None
+    brand_id: Optional[str] = None
+    hotel_ids: list[str] = []
+    brand_ids: list[str] = []
+    cities: list[str] = []
+    is_loyalty: bool = False
+    # 'chain' = brand-level ad; 'single' = per-property ad; 'chain_plus_single' = both.
+    campaign_levels: list[str] = ["single"]
+    # Channels supported in v2.6: app_push (CRM), search_ads (Google Search), meta_ads (FB).
+    channels: list[str] = ["search_ads"]
+
+
+class UnifiedCampaign(BaseModel):
+    """Returned by GETs. Status flow: draft → locked → archived."""
+    id: str
+    user_id: str = ""
+    user_email: str = ""
+    status: Literal["draft", "locked", "archived"] = "draft"
+    raw_brief: str = ""
+    reference_urls: list[str] = []
+    structured: Optional[StructuredCampaign] = None
+    events: list[dict] = []
+    selection: Optional[UnifiedCampaignSelection] = None
+    generated: list[dict] = []
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    locked_at: Optional[str] = None
+
+
+class CampaignPatchRequest(BaseModel):
+    """Partial update for a draft campaign. Server-side rejects writes
+    that touch fields once status='locked' — caller must POST /unlock first."""
+    structured: Optional[StructuredCampaign] = None
+    reference_urls: Optional[list[str]] = None
+    events: Optional[list[dict]] = None
+    selection: Optional[UnifiedCampaignSelection] = None
+
+
+class CampaignGenerateRequest(BaseModel):
+    """Triggered from step 5. The selection here can override the one
+    persisted on the campaign (so the user can re-shoot with different
+    properties / channels without editing the locked brief)."""
+    selection: Optional[UnifiedCampaignSelection] = None
+
+
+class CampaignResultRow(BaseModel):
+    label: str                 # entity display label (hotel/brand/city/Club ITC)
+    scope: str                 # 'hotel' | 'brand' | 'loyalty' | 'city'
+    channel: str               # 'app_push' | 'search_ads' | 'meta_ads'
+    level: str                 # 'chain' | 'single'
+    variants: list[dict] = []  # raw AdCopyOutput / CRMContentOutput dicts
+    tokens_used: int = 0
+    model_used: str = ""
+    time_seconds: float = 0.0
+    error: Optional[str] = None
+
+
+class CampaignGenerateResponse(BaseModel):
+    campaign_id: str
+    results: list[CampaignResultRow] = []
+    total_tokens: int = 0
+    total_cost_inr: float = 0.0
+    time_seconds: float = 0.0
