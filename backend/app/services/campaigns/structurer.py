@@ -20,7 +20,12 @@ _SYSTEM_PROMPT = (
     "campaign brief and extract a clean structured JSON. Output ONLY valid JSON "
     "with no commentary, no markdown fences. Use empty strings or empty arrays for "
     "fields the brief does not mention. Dates must be ISO YYYY-MM-DD. Hotels list "
-    "entries are objects with `hotel_name`."
+    "entries are objects with `hotel_name`.\n\n"
+    "campaign_name MUST be a SHORT memorable name (≤ 60 chars). If the user did "
+    "not state an explicit name, GENERATE a catchy 3-6 word marketing name from "
+    "the brief's hooks (e.g. theme + year, or property + occasion). Examples: "
+    "'Diwali Sparkle 2026', '20th Anniversary Stay', 'Monsoon Reset Mumbai', "
+    "'Festive Family Escape'. NEVER copy the whole brief into campaign_name."
 )
 
 _JSON_SHAPE = """{
@@ -81,7 +86,7 @@ async def structure_brief(raw_brief: str, reference_urls: Iterable[str] | None =
 def _normalize(data: dict, raw: str) -> dict:
     """Ensure required keys + sensible defaults regardless of model output."""
     out = {
-        "campaign_name": (data.get("campaign_name") or _first_line(raw))[:140],
+        "campaign_name": _short_name(data.get("campaign_name") or "", raw),
         "start_date": data.get("start_date") or "",
         "end_date": data.get("end_date") or "",
         "booking_window_start": data.get("booking_window_start") or "",
@@ -114,7 +119,7 @@ def _heuristic_fallback(raw: str, reference_urls: Iterable[str] | None = None) -
     url_match = _URL_RE.search(raw or "")
     dates = _DATE_RE.findall(raw or "")
     return {
-        "campaign_name": _first_line(raw)[:140] or "Untitled campaign",
+        "campaign_name": _short_name("", raw) or "Untitled campaign",
         "start_date": dates[0] if dates else "",
         "end_date": dates[1] if len(dates) > 1 else "",
         "booking_window_start": "",
@@ -139,3 +144,44 @@ def _first_line(text: str) -> str:
         if s:
             return s
     return text.strip()
+
+
+_KEYWORD_HINTS = [
+    "diwali", "holi", "christmas", "new year", "anniversary", "summer",
+    "monsoon", "winter", "spring", "festive", "loyalty", "weekend",
+    "honeymoon", "wedding", "easter", "ramadan", "republic day",
+    "independence", "puja", "navratri", "onam", "pongal", "eid",
+]
+
+
+def _short_name(candidate: str, raw: str) -> str:
+    """Coerce a model-supplied or raw-derived name to ≤ 60 chars and ≤ 8 words.
+
+    If the candidate is too long (the model echoed the brief), build a
+    catchy fallback from the first promising keyword + a 4-digit year if
+    present in the raw brief.
+    """
+    text = (candidate or "").strip()
+    if text:
+        words = text.split()
+        # If the model returned a sentence-like blob, trim aggressively.
+        if len(text) <= 60 and len(words) <= 8:
+            return text
+    # Fallback: pull a marketing-flavoured keyword + the year.
+    raw_l = (raw or "").lower()
+    year_match = re.search(r"\b(20\d{2})\b", raw or "")
+    year = year_match.group(1) if year_match else ""
+    hit = next((k for k in _KEYWORD_HINTS if k in raw_l), "")
+    if hit:
+        base = hit.title()
+        if year:
+            return f"{base} {year}"
+        return f"{base} Stay"
+    # Last resort: a couple of clean tokens from the first line.
+    line = _first_line(raw or candidate)
+    tokens = re.findall(r"[A-Za-z0-9]+", line)
+    tokens = [t for t in tokens if len(t) > 2][:5]
+    if year and year not in tokens:
+        tokens.append(year)
+    name = " ".join(t.capitalize() if t.islower() else t for t in tokens)[:60]
+    return name or "Untitled campaign"

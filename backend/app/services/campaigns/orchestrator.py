@@ -160,9 +160,40 @@ async def _gen_app_push(campaign_structured: StructuredCampaign,
     )
 
 
+def _hotels_under_brand(brand_id: str) -> list[dict]:
+    """Resolve a brand_id to the list of its active hotels (each as an
+    entity dict the orchestrator can iterate)."""
+    if not brand_id:
+        return []
+    try:
+        from backend.app.services.hotels import catalog
+        out: list[dict] = []
+        for h in catalog.hotels_for_brand(brand_id) or []:
+            out.append({
+                "label": h.get("hotel_name") or h.get("hotel_id"),
+                "scope": "hotel",
+                "hotel_id": h.get("hotel_id"),
+                "brand_id": brand_id,
+                "is_loyalty": False,
+            })
+        return out
+    except Exception as exc:
+        logger.debug("hotels_for_brand failed for %s: %s", brand_id, exc)
+        return []
+
+
 async def run_campaign(campaign: dict, override_selection: UnifiedCampaignSelection | None = None) -> dict:
     """Orchestrate the full fan-out for a saved campaign. Returns the dict
-    payload that the route serialises into CampaignGenerateResponse."""
+    payload that the route serialises into CampaignGenerateResponse.
+
+    v2.6.1 — when the selection contains brand_ids AND the user asked for
+    'single' (or 'chain_plus_single'), this expands every brand into its
+    member hotels so each property gets its own per-property generation
+    (with that property's own GMB reviews, USPs, historic ad-copy
+    exemplars and past campaigns — every signal the ad_generator already
+    pulls when scope='hotel'). 'chain' level still produces ONE
+    brand-scope ad per brand with anonymized cross-property exemplars.
+    """
     structured = StructuredCampaign(**(campaign.get("structured") or {"campaign_name": "Untitled"}))
     selection = override_selection or UnifiedCampaignSelection(**(campaign.get("selection") or {}))
     if not selection.channels:
@@ -171,51 +202,109 @@ async def run_campaign(campaign: dict, override_selection: UnifiedCampaignSelect
         selection.campaign_levels = ["single"]
     reference_urls = list(campaign.get("reference_urls") or [])
 
+    # Effective level set (after expanding 'chain_plus_single').
+    eff_levels: list[str] = []
+    for lvl in selection.campaign_levels:
+        if lvl == "chain_plus_single":
+            eff_levels.extend(["chain", "single"])
+        else:
+            eff_levels.append(lvl)
+    want_chain = "chain" in eff_levels
+    want_single = "single" in eff_levels
+
     entities = _expand_entities(selection)
+
+    # Decompose into per-(entity, level) work items.
+    # Brand entities → 'chain' yields the brand entity itself; 'single'
+    # explodes into hotels under that brand. Loyalty stays brand-shape.
+    # City → 'chain' = city scope; 'single' = each hotel in city.
+    work: list[tuple[dict, str]] = []
+    seen_keys: set[tuple] = set()
+
+    def _push(entity: dict, level: str):
+        key = (
+            entity.get("scope"),
+            entity.get("hotel_id") or "",
+            entity.get("brand_id") or "",
+            entity.get("label") or "",
+            level,
+        )
+        if key in seen_keys:
+            return
+        seen_keys.add(key)
+        work.append((entity, level))
+
+    for entity in entities:
+        scope = entity.get("scope")
+        if scope == "hotel":
+            if want_single:
+                _push(entity, "single")
+            if want_chain and entity.get("brand_id"):
+                brand_entity = {
+                    "label": entity["brand_id"], "scope": "brand",
+                    "brand_id": entity["brand_id"], "is_loyalty": False,
+                }
+                _push(brand_entity, "chain")
+        elif scope == "brand":
+            if want_chain:
+                _push(entity, "chain")
+            if want_single:
+                for hotel_entity in _hotels_under_brand(entity.get("brand_id", "")):
+                    _push(hotel_entity, "single")
+        elif scope == "loyalty":
+            # Loyalty programmes only make sense at chain level.
+            _push(entity, "chain")
+        elif scope == "city":
+            if want_chain:
+                _push(entity, "chain")
+            if want_single:
+                try:
+                    from backend.app.services.hotels import catalog
+                    city = (entity.get("cities") or [None])[0] or ""
+                    for h in (catalog.hotels_for_city(city) or []):
+                        _push({
+                            "label": h.get("hotel_name") or h.get("hotel_id"),
+                            "scope": "hotel", "hotel_id": h.get("hotel_id"),
+                            "brand_id": h.get("brand_id"), "is_loyalty": False,
+                        }, "single")
+                except Exception:
+                    pass
+
     results: list[dict] = []
     total_tokens = 0
     total_seconds = 0.0
     overall_t0 = time.time()
 
-    for entity in entities:
+    for entity, level in work:
         entity_label = _resolve_label(entity)
-        for level in selection.campaign_levels:
-            # 'chain_plus_single' explodes into both 'chain' and 'single' for this entity
-            sub_levels = ["chain", "single"] if level == "chain_plus_single" else [level]
-            for sub in sub_levels:
-                # 'single' makes no sense for brand-/loyalty-scoped entities — skip silently.
-                if sub == "single" and entity.get("scope") in ("brand", "loyalty", "city"):
-                    continue
-                if sub == "chain" and entity.get("scope") == "hotel" and not entity.get("brand_id"):
-                    continue
-                for channel in selection.channels:
-                    row = CampaignResultRow(
-                        label=entity_label, scope=entity.get("scope", "hotel"),
-                        channel=channel, level=sub,
+        for channel in selection.channels:
+            row = CampaignResultRow(
+                label=entity_label, scope=entity.get("scope", "hotel"),
+                channel=channel, level=level,
+            )
+            try:
+                if channel == "app_push":
+                    variants, tokens, model, seconds = await _gen_app_push(structured, entity, reference_urls)
+                else:
+                    variants, tokens, model, seconds = await _gen_search_or_meta(
+                        structured, entity, channel, level, reference_urls,
                     )
-                    try:
-                        if channel == "app_push":
-                            variants, tokens, model, seconds = await _gen_app_push(structured, entity, reference_urls)
-                        else:
-                            variants, tokens, model, seconds = await _gen_search_or_meta(
-                                structured, entity, channel, sub, reference_urls,
-                            )
-                        row.variants = variants
-                        row.tokens_used = tokens
-                        row.model_used = model
-                        row.time_seconds = seconds
-                        total_tokens += tokens
-                        total_seconds += seconds
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning(
-                            "campaign_subgen_failed",
-                            extra={"json_fields": {
-                                "label": entity_label, "channel": channel, "level": sub,
-                                "exc": str(exc)[:200],
-                            }},
-                        )
-                        row.error = str(exc)[:300]
-                    results.append(row.model_dump())
+                row.variants = variants
+                row.tokens_used = tokens
+                row.model_used = model
+                row.time_seconds = seconds
+                total_tokens += tokens
+                total_seconds += seconds
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "campaign_subgen_failed",
+                    extra={"json_fields": {
+                        "label": entity_label, "channel": channel, "level": level,
+                        "exc": str(exc)[:200],
+                    }},
+                )
+                row.error = str(exc)[:300]
+            results.append(row.model_dump())
 
     return {
         "campaign_id": campaign.get("id", ""),

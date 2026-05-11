@@ -312,8 +312,8 @@ export default function UnifiedCampaign() {
         )}
       </div>
 
-      <div className="wizard-progress" style={{ marginTop: 12 }}>
-        {STEPS.map((s, i) => (
+      <div className="wizard-steps" style={{ marginTop: 12 }}>
+        {STEPS.map((s) => (
           <div key={s.num} className={`wizard-step ${step === s.num ? 'active' : ''} ${step > s.num ? 'completed' : ''}`}>
             <div className="wizard-step-circle">{s.num}</div>
             <span className="wizard-step-label">{s.label}</span>
