@@ -1,203 +1,184 @@
 # Vantage GenAI — Codebase Map
 
-A guided tour for anyone (human or agent) joining the project. Pair with
-`MEMORY.md` for runtime state and `README.md` for product framing.
+App v2.6 · 2026-05-11. Branch `custome-HL`. Live `https://vantage-adcopy-agent-yxsestxy7a-uc.a.run.app`.
 
-App version: **2.3** (last live: 2026-05-07).
+Pure file index — one line per file, what lives there. Pair with `MEMORY.md` (runtime state) and `AGENT_HANDOFF.md` (rules + paved paths).
 
----
+## Backend — `backend/app/**`
 
-## High-level architecture
-
-```
-                ┌─────────────────────────┐
-                │   React frontend         │  Vite SPA, served as static
-                │   (Editorial Mono UI)    │  assets from FastAPI in prod
-                └────────────┬────────────┘
-                             │  HTTPS / JWT
-                ┌────────────▼────────────┐
-                │   FastAPI backend        │  Cloud Run, asia: nope, us-central1
-                │   (uvicorn + middleware) │
-                └────────────┬────────────┘
-        ┌────────────┬───────┴────────┬──────────────┐
-        ▼            ▼                ▼              ▼
-   ┌────────┐  ┌──────────┐  ┌──────────────┐  ┌────────────┐
-   │ Vertex │  │Firestore │  │  BigQuery    │  │Google Places│
-   │  AI    │  │ (NoSQL)  │  │ (analytics)  │  │   + GMB     │
-   │ Gemini │  │          │  │              │  │             │
-   └────────┘  └──────────┘  └──────────────┘  └────────────┘
-```
-
-`gemini-3.1-pro-preview` for generation; `text-embedding-005` for retrieval
-embeddings; Vertex AI Vector Search **provisioned but not deployed** — RAG
-falls through to in-app cosine similarity over Firestore-cached embeddings
-(see Option D in `vector_index_manager._firestore_similarity_search`).
-
----
-
-## Backend layout (`backend/app/`)
-
-```
-backend/app/
-├── main.py                    FastAPI app, observability bootstrap, router registration
-├── core/
-│   ├── version.py             APP_VERSION constant — kept in sync with frontend + README via scripts/bump_version.py
-│   ├── config.py              Pydantic settings + secret manager hydration
-│   ├── auth.py                JWT, bcrypt, 5-tier RBAC helpers (require_role, user_can_access_hotel/brand)
-│   ├── secrets.py             Secret Manager wrapper with 5-min TTL cache
-│   ├── database.py            Firestore client singleton (ADC on Cloud Run, key file locally)
-│   ├── vertex_client.py       Vertex AI SDK init + GenerativeModel factory + cost calc
-│   ├── observability.py       Cloud Trace + structured Cloud Logging setup
-│   └── cache.py               Redis-or-memory cache with TTL constants
-├── middleware/
-│   └── request_logger.py      Per-request trace_id + structured access log
-├── models/
-│   └── schemas.py             Every Pydantic schema (AdGenerationRequest/Response, UserCreate, ScopeAssignment, HotelOut, etc.)
-├── routers/
-│   ├── health.py              GET /health, /version (returns APP_VERSION)
-│   ├── auth.py                login, logout, /auth/me (hydrated), /auth/me/billing (visibility-gated)
-│   ├── admin.py               5-tier user CRUD, audit logs, usage stats, settings, scope-search
-│   ├── hotels.py              POST /hotels/ingest (CSV), CRUD, scope-search, role-aware reads
-│   ├── knowledge.py           GET /kb/tree — admin-only hierarchical brand→hotel view
-│   ├── generate.py            POST /generate, /generate/refine — wires generation_id + structured error logs
-│   ├── places.py              Google Places autocomplete proxy
-│   ├── training.py            POST /upload (with progress polling), /sessions, /progress/{run_id}, DELETE /sessions/{id}
-│   ├── events.py              Vertex AI grounding-based event search (replaces Custom Search API)
-│   ├── crm.py                 Multi-channel CRM campaign generator
-│   └── copilot.py             Conversational brief builder
-└── services/
-    ├── ad_generator.py            Main pipeline. Resolves selection.scope, fetches hotel attrs, retrieves anonymized exemplars when scope=brand, threads generation_id everywhere.
-    ├── rag_engine.py              Semantic retrieval. retrieve_ad_insights(scope, brand_id, hotel_id, ...). _anonymize_passage strips property identity for brand-level generations.
-    ├── training_engine.py         Legacy AI-summarization training flow (kept for ad_performance/brand_usp/crm_performance section types).
-    ├── scraper.py                 Multi-page crawler (1-level deep) for reference URL ingestion.
-    ├── reviews.py                 Google Places Find Place + review fetch (skipped for brand-scope generations).
-    ├── csv_ingestion.py           Legacy CSV ingestion (used by /admin/upload/historical-ads endpoints).
-    ├── safety/content_filter.py   Vertex AI safety ratings + custom hospitality blocklist
-    ├── analytics/
-    │   ├── audit_logger.py        Streams generation_audit, training_audit, safety_events to BigQuery
-    │   ├── bq_writer.py           write_ad_performance_rows, write_normalized_records (v2.1)
-    │   ├── bq_query_engine.py     get_top_ads_for_scoring, get_pattern_summary, etc. (24h Firestore cache)
-    │   └── quality_scorer.py      score_records: recency_decay × confidence_weight × ctr_normalized; impression floor at 100
-    ├── seasonal/
-    │   ├── season_context.py      Indian hospitality calendar (10 seasons with demand_uplift_pct)
-    │   └── trend_analyzer.py      Vertex AI Google Search grounding for trending keywords
-    ├── ab_testing/
-    │   ├── variant_generator.py   3-angle variant generation (urgency, emotional, rational)
-    │   └── performance_predictor.py  BQ-backed scoring of generated variants
-    ├── ingestion/
-    │   ├── normalized_record.py   NormalizedAdRecord dataclass (universal pipeline shape)
-    │   ├── csv_validator.py       Schema validation + ADAPTER_SECTION_TYPES dispatch
-    │   ├── batch_processor.py     Async chunked processing with Firestore progress writes
-    │   └── adapters/
-    │       ├── google_ads_adapter.py    39-col Editor CSV → exploded per-asset records
-    │       ├── moengage_adapter.py      Push notification CSV → split per Android/iOS, drops zero-impression rows
-    │       └── brand_usp_adapter.py     3-col CSV (brand_name, hotel_name, usps) → individual USP records
-    ├── embedding/
-    │   ├── vertex_embedder.py     embed_records → text-embedding-005 + content-hash cache + Firestore persist + Vector Search upsert
-    │   └── vector_index_manager.py  upsert_vectors + query_similar with restricts (brand_id, campaign_type, season, impression_bucket)
-    │                              Falls through to _firestore_similarity_search when no Vector Search endpoint deployed.
-    ├── tasks/
-    │   └── task_dispatcher.py     Cloud Tasks HTTP queue wrapper
-    └── hotels/                    (v2.2)
-        ├── catalog.py             upsert_brand, upsert_hotel, ingest_csv, search_scope, list_hotels/list_brands, soft_delete_hotel
-        └── enrichment.py          enrich_hotel/enrich_batch — Place ID resolution, fire-and-forget after ingest
-```
-
----
-
-## Frontend layout (`frontend/src/`)
-
-```
-frontend/src/
-├── version.js                   APP_VERSION mirror — bumped via scripts/bump_version.py
-├── main.jsx                     React entry
-├── App.jsx                      Router. /hub is post-login default.
-├── styles/
-│   ├── editorial-mono.css       v2.2+ design system (tokens + utility classes). Opt-in via .em-scope or em-* classes.
-│   └── (legacy)                 The pre-existing app stylesheet still drives Dashboard/CRMWizard/Admin tables.
-├── contexts/
-│   └── ThemeContext.jsx         Theme (light|dark) + density (comfy|normal|dense). Writes data-theme + data-em-theme + data-em-density on <html>.
-├── hooks/
-│   └── useAuth.jsx              JWT bootstrap + logout helper
-├── services/
-│   └── api.js                   Axios instance + every API method (login, generateAds, startTraining, getTrainingProgress, deleteTrainingSession, ...)
-├── components/
-│   ├── AppLayout.jsx            Sidebar shell (Home, Ad Copy, CRM, Calendar, My Account, Admin section). Mounts <TweaksPanel/>.
-│   ├── PropertySwitcher.jsx     Cascading brand→hotel typeahead (v2.2). Renders selection chips.
-│   ├── TweaksPanel.jsx          Floating bottom-right panel for theme + density.
-│   ├── TrainingWizard.jsx       Training upload form with live progress bar + sessions table + KB.
-│   ├── ContextSelector.jsx      Legacy hotel/brand picker (still used by Dashboard).
-│   ├── CopilotChat.jsx          Conversational brief builder.
-│   ├── AdResults.jsx            Generated ad copy display.
-│   ├── GenerationProgress.jsx   Generation progress UI.
-│   └── admin/
-│       └── UserForm.jsx         5-tier role tile picker + scope assignment + visibility tickboxes.
-└── pages/
-    ├── Hub.jsx                  Hub Home (v2.3) — hero + identity + tools + recents.
-    ├── Dashboard.jsx            Ad Copy Builder (with ⌘⏎ + ⌘K shortcuts).
-    ├── CRMWizard.jsx            CRM campaign builder.
-    ├── MarketingCalendar.jsx    Quarter grid view (v2.3).
-    ├── MyAccount.jsx            Profile / Properties / Billing (token columns visibility-gated).
-    ├── Admin.jsx                Users + Training + Audit tabs (admin only).
-    ├── LandingPage.jsx          Pre-login landing.
-    ├── Login.jsx                Login form.
-    └── admin/
-        ├── HotelsIngestion.jsx  Bulk CSV + manual + template download (admin only).
-        └── KnowledgeBase.jsx    Hierarchical brand→hotel tree (admin only).
-```
-
----
-
-## Infrastructure
-
-```
-infra/
-├── setup-gcp.sh                One-shot bootstrap: 20 GCP APIs, 4 SAs, IAM, AR, GCS, BQ
-└── cloud-run-service.yaml      Production Cloud Run spec (2Gi/2CPU, min=1, no CPU throttle)
-
-scripts/
-├── bump_version.py             Single-shot version bumper (4 files in lockstep)
-└── (other admin scripts)
-
-cloudbuild.yaml                  Build pipeline: Docker build → push to AR → deploy Cloud Run
-Dockerfile                       Multi-stage: Node 20 frontend build → Python 3.12 backend
-```
-
----
-
-## API surface
-
-`/health` `/version` — open
-`/api/v1/auth/{login,logout,me,me/billing}` — JWT auth
-`/api/v1/admin/{users,users/{id},scope-search,upload/*,audit-logs,usage-stats,settings}` — admin only
-`/api/v1/hotels/{ingest,brands,scope-search,/{id}}` — admin writes, role-scoped reads
-`/api/v1/kb/tree` — admin only
-`/api/v1/generate` `/api/v1/generate/refine` — authenticated; carries generation_id
-`/api/v1/training/{upload,sessions,progress/{run_id},sessions/{id}}` — admin only
-`/api/v1/places/autocomplete` — proxied Google Places
-`/api/v1/events/search` — Vertex AI grounding
-`/api/v1/crm/{generate,refine,export-calendar}` — authenticated
-`/api/v1/copilot/{chat,briefs/save,briefs/{mode},briefs/{id}}` — authenticated
-
----
-
-## Where to add things
-
-| Adding... | Edit |
+### Core (`core/`, `middleware/`)
+| File | Role |
 |---|---|
-| New role | `core/auth.py` constants + `models/schemas.py` ROLES + `core/auth.py` helpers + `routers/admin.py` `_validate_assignments` + `components/admin/UserForm.jsx` ROLES |
-| New training section type | `services/ingestion/adapters/<new>.py` + register in `csv_validator.ADAPTER_SECTION_TYPES` + branch in `routers/training.py._run_v21_ingestion` + `frontend/src/components/TrainingWizard.jsx` SECTION_TYPES |
-| New ad platform | `services/ad_generator.py` PLATFORM_SPECS + PLATFORM_TO_CAMPAIGN_TYPE + `frontend/src/pages/Dashboard.jsx` PLATFORMS |
-| New visual screen | `frontend/src/pages/<New>.jsx` + register in `App.jsx` Routes + add NavLink in `components/AppLayout.jsx` |
-| New KPI tracked in BigQuery | ALTER `vantage.ad_performance_events` (use the same PATCH-with-full-schema pattern in `infra/`) + add field in `services/analytics/bq_writer.py` and `services/ingestion/normalized_record.py:as_bq_row` |
-| Bump version | `python scripts/bump_version.py 2.4` then commit + Cloud Build |
+| `main.py` | FastAPI app, router mounts, startup hook (`ensure_club_itc`), SPA static serve. |
+| `core/auth.py` | JWT, bcrypt, `get_current_user`, `require_admin`, `require_role`, 5-tier role consts, `has_group_scope`, `user_can_access_hotel/brand`, `resolve_user_hotel_ids/brand_ids`, assignment cache. |
+| `core/config.py` | `get_settings()` — env vars + secret loading. |
+| `core/database.py` | `get_firestore()` singleton. |
+| `core/vertex_client.py` | Vertex AI init + `get_generative_model(model_name, system_instruction=)`. |
+| `core/cache.py` | In-process TTL cache + `cache_key()` + `TTL_*` constants. |
+| `core/version.py` | `APP_VERSION`, `APP_VERSION_DATE`. Bumped via `scripts/bump_version.py`. |
+| `core/observability.py` | Cloud Logging + Cloud Trace setup. |
+| `core/secrets.py` | Secret-Manager helpers. |
+| `middleware/request_logger.py` | Structured request logging with trace IDs. |
 
----
+### Routers (`routers/`) — every router under `/api/v1` prefix
+| File | Mount | What |
+|---|---|---|
+| `health.py` | `/health` | Liveness + version. |
+| `auth.py` | `/auth/{login,logout,me,me/billing}` | Login + JWT. `UserOut` forces token visibility=True for admins (v2.5). `/billing` retries without composite-index ordering on failure. |
+| `admin.py` | `/admin/users{,/{id}}`, `/admin/scope-search`, `/admin/settings`, `/admin/audit-logs`, `/admin/usage-stats`, `/admin/export/usage`, `/admin/upload/*` | 5-tier user CRUD. Helpers: `_validate_assignments`, `_write_assignments`, `_build_scope_summary`, `_safe_assignment`, `_user_to_out`. |
+| `hotels.py` | `/hotels/*` | `list_hotels`, `/scope-search?include_empty=true` (picker pre-fill), `/cities`, `/{id}`, `/{id}/context` (returns hotel + brand + USPs + recent_generations + **live GMB rating/review_count**, cached 24h via `gmb_details_at`), `/brands/{id}`, `/brands/{id}/context`, ingest CSV (8 cols incl. city), manual POST, PATCH, soft DELETE. |
+| `generate.py` | `/generate{,/refine,/recent,/url-suggestions}` | Ad-copy. `_enforce_selection_access` (v2.4). `_explode_selection_for_fanout` when `selection.generation_mode='per_entity'`. `url-suggestions` falls back to unordered scan. Audit-log write wrapped in try/except. |
+| `crm.py` | `/crm/{generate,refine,export-calendar}` | CRM. v2.5 wrapped in try/except + structured exc log. |
+| `campaigns.py` | `/campaigns{,/structure,/{id},/{id}/lock,/{id}/unlock,/{id}/archive,/{id}/generate}` | Unified Campaign CRUD. PATCH draft-only (409 on locked). Owner-or-admin guard via `_require_owner_or_admin`. |
+| `training.py` | `/training/{upload,progress/{run_id},answer,sessions,sessions/export,directives,knowledge-base}` | v2.1 deterministic ingestion + legacy AI-summarisation. |
+| `knowledge.py` | `/kb/tree?brand_id=` | Admin hierarchical KB — brand→USPs+notes→hotels. |
+| `places.py` | `/places/autocomplete` | Google Places autocomplete → details (rating + review_count). |
+| `events.py` | `/events/search` | Vertex AI Google-Search-grounded event lookup. |
+| `copilot.py` | `/copilot/{chat,briefs/save,briefs/{mode},briefs/{id}}` | Conversational brief mode. |
 
-## Conventions
+### Services (`services/`)
+| File | Role |
+|---|---|
+| `ad_generator.py` | `generate_ad_copy(request)` — main pipeline. Scope-aware (`hotel`/`brand`/`loyalty`/`multi`/`city`). Pulls reviews (skipped for brand/loyalty), scraped URLs, RAG insights, USPs, training directives, seasonal. v2.4.1 fix: `_build_user_prompt` recomputes `primary_ct` inline via `_primary_campaign_type(platforms)`. Helpers: `_primary_campaign_type`, `_build_system_prompt`, `_parse_response`. |
+| `rag_engine.py` | `retrieve_ad_insights(scope, brand_id, hotel_id, hotel_name_for_anonymize, city_for_anonymize, is_loyalty)`. Loyalty mode pulls top 2 exemplars from each of up to 8 partner brands, anonymized. `get_brand_usps()` **async — must await**. `_anonymize_passage()` strips property names + possessives ("X's spa" → "the spa"). `_semantic_retrieve` → embed → Vector Search → Firestore fetch → sort by perf_score. |
+| `crm_generator.py` | `generate_crm_content(request)` — v2.5 awaits `get_brand_usps`. Calendar generator gracefully handles non-ISO dates. |
+| `profile_insights.py` | `get_or_create_profile(hotel_name, urls, listings)` — cached scrape + review summary. |
+| `scraper.py` | `scrape_hotel_page(url)` — defensive HTTP + BS4. |
+| `reviews.py` | `fetch_google_reviews(gmb_url, hotel_name)`. |
+| `training_engine.py` | `get_training_directives(section_type=None)` — sync. |
+| `event_search.py` | Vertex AI grounded event search. |
+| `copilot_engine.py` | Brief tracker + multi-turn chat. |
+| `csv_ingestion.py` | Legacy CSV ingestors: `ingest_historical_csv`, `ingest_brand_usp_csv`. |
+| `hotels/catalog.py` | `slugify`, `upsert_brand(name, kind='hotel')`, `ensure_club_itc()`, `set_brand_kind`, `upsert_hotel(row, brand_id, brand_name)`, `recount_brand_hotels`, `ingest_csv(df)`, `list_hotels/list_brands`, `search_scope(q, include_empty)`, `list_cities`, `hotels_for_brand(brand_id)`, `hotels_for_city(city)`, `get_hotel/get_brand`, `soft_delete_hotel`. Constants `CLUB_ITC_BRAND_ID='club-itc'`, `CLUB_ITC_DEFAULT_VOICE`. |
+| `hotels/enrichment.py` | `enrich_hotel(id)`, `enrich_batch(ids)` — async place_id resolution; `_extract_place_id`, `_find_place_by_text`. |
+| `campaigns/structurer.py` | `structure_brief(raw, urls)` — Gemini → StructuredCampaign JSON. `_short_name()` enforces ≤60 chars / ≤8 words. `_heuristic_fallback()` for LLM failures. |
+| `campaigns/orchestrator.py` | `run_campaign(campaign, override_selection)` — fan-out per (entity × channel × level). v2.6.1: brand entity + `single`/`chain_plus_single` expands to `hotels_for_brand`. City expands to `hotels_for_city`. Reuses `ad_generator` (search/meta) + `crm_generator` (app_push). Helpers: `_hotels_under_brand`, `_expand_entities`, `_channel_to_platforms`, `_resolve_label`, `_gen_search_or_meta`, `_gen_app_push`. |
+| `embedding/vertex_embedder.py` | `embed_texts(texts, use_cache=True)` — Vertex `text-embedding-005`. |
+| `embedding/vector_index_manager.py` | `query_similar(...)` — ANN search; Option-D in-app cosine fallback. |
+| `ingestion/normalized_record.py` | `NormalizedAdRecord`, `season_for_month(month)`. |
+| `ingestion/csv_validator.py` | `ADAPTER_SECTION_TYPES` registry, tolerant decode. |
+| `ingestion/batch_processor.py` | v2.1 pipeline: validate → parse → score → embed → write. |
+| `ingestion/adapters/google_ads_adapter.py` | Parse 39-col Google Ads Editor CSV. |
+| `ingestion/adapters/moengage_adapter.py` | Parse 11-col MoEngage push export. |
+| `ingestion/adapters/brand_usp_adapter.py` | Parse 3-col `brand_name, hotel_name, usps` CSV. |
+| `analytics/audit_logger.py` | `log_generation(...)` → BigQuery `vantage.generation_audit`. |
+| `analytics/bq_query_engine.py` | Cached aggregations from `vantage.ad_performance_events`. |
+| `analytics/bq_writer.py` | Append rows to BQ tables. |
+| `analytics/quality_scorer.py` | Computes `performance_score`. |
+| `seasonal/season_context.py` | `build_seasonal_prompt_context(flight_date)`. |
+| `seasonal/trend_analyzer.py` | Trend windows. |
+| `safety/content_filter.py` | `check_response(response, brand_id, request_type)` — Gemini safety + custom rules. |
+| `ab_testing/variant_generator.py` | A/B variant generation helpers. |
+| `ab_testing/performance_predictor.py` | Predictive scoring stub. |
+| `tasks/task_dispatcher.py` | Cloud Tasks dispatch. |
 
-- **Role check ordering:** `require_admin` for write paths; `user_can_access_hotel/brand` for any cross-scope read; legacy `get_current_user` only when role doesn't matter.
-- **Logging:** structured fields via `logger.info("event_name", extra={"json_fields": {...}})`. Include `generation_id` whenever known.
-- **Errors in critical paths:** never let an audit/log/cache write break the primary flow. Wrap in try/except and log at debug.
-- **Versioning:** any user-visible behavior change → bump version. The bumper script ensures README + frontend + backend all flip together so screenshots and BQ rows agree on what was live when.
-- **Branch:** always `custome-HL`. `main` is upstream and untouched.
+### Models (`models/`)
+| File | Role |
+|---|---|
+| `models/schemas.py` | ALL Pydantic models. Key items: `ROLES`, `ScopeAssignment` (brand/hotel/city/group + `brand_only`), `ScopeSummary`, `UserCreate/UserOut`, `PropertySelection` (`is_loyalty`, `generation_mode`), `HotelIngestRow/HotelOut/BrandOut` (`kind`), `AdGenerationRequest/Response`, `CRMGenerateRequest/Response`, training/copilot models, **Unified Campaign block at bottom**: `UnifiedCampaignBrief`, `StructuredHotel`, `StructuredCampaign`, `UnifiedCampaignSelection` (adds `campaign_levels` + `channels`), `UnifiedCampaign`, `CampaignPatchRequest`, `CampaignGenerateRequest`, `CampaignResultRow`, `CampaignGenerateResponse`. |
+
+## Frontend — `frontend/src/**`
+
+### Top-level
+| File | Role |
+|---|---|
+| `App.jsx` | Routes; provider chain `ThemeProvider > AuthProvider > SelectionProvider`. Routes: `/`, `/login`, `/hub`, `/adcopy`, `/crm`, `/calendar`, `/unified`, `/account`, `/admin{,/hotels,/knowledge}`. |
+| `main.jsx` | Vite entry; imports `index.css`. |
+| `index.css` | Legacy app CSS. `--gold`/`--primary` aliased to Editorial Mono red (v2.3.1). Sidebar, forms, buttons, tabs, wizard-steps, wizard-panel, wizard-nav. |
+| `App.css` | Unused boilerplate (Vite default). |
+| `styles/editorial-mono.css` | v2.2+ Editorial Mono palette + components (`em-card`, `em-pill`, `em-chip`, `em-switcher`, `em-mode-card`, `em-hero`, `em-identity`, `em-tool`, `em-tree`, `em-stat`, `em-panel`, `em-cal-*`, `em-tweaks`). Theme via `data-em-theme`, density via `data-em-density`. `em-switcher input` scoped to text inputs only (v2.4.1 fix). |
+| `version.js` | `APP_VERSION`, `APP_VERSION_DATE`. |
+
+### Contexts
+| File | Role |
+|---|---|
+| `contexts/ThemeContext.jsx` | Theme + density, localStorage persistence, sets `data-em-theme`/`data-em-density`/`data-theme` on `<html>`. |
+| `contexts/SelectionContext.jsx` | **v2.5** — `useSelection()` returns `{selection, setSelection}`. Persists to `localStorage['vantage.selection.v1']`. Cleared on logout. |
+
+### Hooks
+| File | Role |
+|---|---|
+| `hooks/useAuth.jsx` | `AuthProvider`, `useAuth()`, login/logout, user JSON in `localStorage`. |
+
+### Pages (`pages/`)
+| File | Role |
+|---|---|
+| `LandingPage.jsx` | Public landing. Uses `APP_VERSION` for badges. |
+| `Login.jsx` | Email + password. Zap icon = `var(--primary)`. |
+| `Hub.jsx` | Post-login home. Hero, identity strip (honors `SelectionContext` — shows hotel/brand/composite labels), tools grid, recents, property memory ("All" for admin/group), Switch property/brand **modal** with `IntelligentPropertyPicker` + counter + Clear. |
+| `Dashboard.jsx` | Ad Copy form. `useLocation` for router-state selection bootstrap, `useSelection()`, multi-hotel auto-fill (Promise.allSettled over `getHotelContext`), `urlOptional()` for brand/loyalty/city, fan-out radio when `needsFanoutPrompt()`. Renders `<RecentGenerations>` below. |
+| `CRMWizard.jsx` | 5-step CRM wizard. v2.5 uses `IntelligentPropertyPicker` + `useSelection()`. Step 3 has Skip Events button (panel + nav). |
+| `MarketingCalendar.jsx` | Quarter view. v2.5 dropdowns: View-by (Property/Campaign/Brand/Club ITC) + drill-down. Honors `useSelection()`. |
+| `UnifiedCampaign.jsx` | **v2.6** 5-step wizard: Brief → Finalize (lock) → Events (skip) → Properties+Channels+Levels → Generate. Stepper class `.wizard-steps`. `VariantBlock` for inline edit. CSV export. |
+| `MyAccount.jsx` | Tabs: Profile / Properties & brands / Billing & usage / **Unified Briefs** (v2.6). Billing uses `Promise.allSettled`. Unified Briefs lists campaigns with Edit (auto-unlocks) + Archive. |
+| `Admin.jsx` | Admin Panel tabs: Users / Training / Audit & Usage / **Hotels Ingestion** / **Knowledge Base** / LLM Settings (v2.3.1 moved Hotels+KB into tabs). |
+| `admin/HotelsIngestion.jsx` | CSV bulk + manual hotel form. v2.4: `city` optional column. Template download. |
+| `admin/KnowledgeBase.jsx` | Hierarchical brand→hotel tree. |
+
+### Components (`components/`)
+| File | Role |
+|---|---|
+| `AppLayout.jsx` | Sidebar shell. Order: Home / Unified Campaign / Ad Copy / CRM / Marketing Calendar / My Account / (admin) Users & Settings. Theme toggle + version footer. |
+| `AppNavbar.jsx` | Legacy (unused). |
+| `IntelligentPropertyPicker.jsx` | **v2.4** picker. Reads `scopeSummary` to pick UX mode. Grouped dropdown (Loyalty / Cities / Brands / Hotels). Folds selected chips back into groups. "N selected" pill inside input (v2.4.2). Emits `{scope, hotel_ids, brand_ids, cities, is_loyalty, _labels}`. |
+| `PropertySwitcher.jsx` | v2.2 single-select cascading picker (kept for admin UserForm). |
+| `RecentGenerations.jsx` | v2.4 panel — last N briefs from `/generate/recent` filtered by hotel_id/brand_id; "Re-use brief" → `onReuse(row)`. |
+| `ContextSelector.jsx` | **Legacy** — replaced by IntelligentPropertyPicker. No active imports; safe to remove next cleanup. |
+| `AdResults.jsx` | Per-platform ad copy renderer with inline edit + refine. |
+| `CRMResults.jsx` | CRM channel results (messages + char counts + warnings). |
+| `CalendarView.jsx` | Day-grid CRM calendar. |
+| `CampaignCalendarGrid.jsx` | Quarter grid component. |
+| `CampaignTableView.jsx` | CRM messages table view. |
+| `ChannelFrequency.jsx` | Per-channel send-days picker for CRM. |
+| `EventCalendar.jsx` | Events grid (reused by CRM step 3 and UnifiedCampaign step 3). |
+| `CopilotChat.jsx` | Conversational ad-copy/CRM mode. |
+| `BriefSummaryCard.jsx`, `BriefTracker.jsx` | Copilot brief state visualisation. |
+| `GenerationProgress.jsx` | Skeleton + spinner during long generations. |
+| `TrainingWizard.jsx` | Admin training upload (v2.3 cleanup — Sessions only). |
+| `TweaksPanel.jsx` | Floating theme + density FAB. |
+| `admin/UserForm.jsx` | v2.4 form. Role tile + 5 grant presets (Brand only / All hotels in brand / Brand + few hotels / Club ITC only / Complete group / Hotels only) + city add-on chips. Uses `PropertySwitcher` (single mode). |
+
+### Services
+| File | Role |
+|---|---|
+| `services/api.js` | Axios instance + ALL API clients. Auth · admin · generate (`generateAds`, `refineAds`, `getRecentGenerations`, `getUrlSuggestions`) · hotels (`getHotel`, `getHotelContext`, `getBrandContext`, `getCities`, `scopeSearch`) · training · places · CRM · copilot · **campaigns** (`structureCampaign`, `createCampaign`, `lockCampaign`, `unlockCampaign`, `archiveCampaign`, `listCampaigns`, `getCampaign`, `patchCampaign`, `generateCampaign`). |
+
+## Infra & ops
+
+| File | Role |
+|---|---|
+| `Dockerfile` | 2-stage: node:20 builds frontend → python:3.12 runs uvicorn; copies `frontend/dist`. |
+| `cloudbuild.yaml` | Cloud Build steps. **Uses `$COMMIT_SHA` — manual submits MUST pass `--substitutions=COMMIT_SHA=manual-<ts>`.** |
+| `scripts/bump_version.py` | Bumps `core/version.py` + `frontend/src/version.js` + `frontend/package.json` + `README.md`. ASCII-only output (Windows cp1252-safe). |
+| `backend/requirements.txt` | Python deps. |
+| `frontend/package.json` | npm deps (vite, react, axios, lucide-react, react-hot-toast). |
+| `frontend/vite.config.js` | Vite config. |
+| `firestore.rules`, `firestore.indexes.json` | Rules + composite indexes (some still missing — code tolerates via `try`/fallback unordered scan). |
+
+## Firestore collections
+
+| Collection | Doc shape (key fields) |
+|---|---|
+| `users/{uid}` | full_name, email, password_hash, role (admin/brand_manager/area_manager/hotel_marketing_manager/agency/user), show_token_count, show_token_amount, created_at |
+| `property_assignments/{uid}/items/{auto}` | scope, brand_id?, hotel_id?, city?, brand_only, granted_at |
+| `brands/{brand_id}` | brand_name, slug, voice, hotel_count, **kind** (hotel/loyalty), created_at |
+| `hotels/{hotel_id}` | hotel_name, hotel_code, brand_id, brand_name, **city**, rooms_count, fnb_count, website_url, gmb_url, gmb_place_id, **gmb_rating, gmb_review_count, gmb_details_at** (24h cache), status, ingested_at, last_modified_at |
+| `audit_logs/{auto}` | user_email, user_id, action, hotel_name, **hotel_id**, **brand_id**, **scope**, offer_name, platforms, inclusions, reference_urls, tokens_consumed, cost_inr, model_used, time_seconds, timestamp, generation_id, app_version |
+| `unified_campaigns/{id}` | user_id, user_email, status (draft/locked/archived), raw_brief, reference_urls, structured{}, events[], selection{}, generated[], created_at, updated_at, locked_at |
+| `embedding_cache/{hash}` | embedding[], headline, description, campaign_type, brand_id, hotel_id?, performance_score, season |
+| `bq_query_cache/{key}` | 24h cached BQ aggregates |
+| `training_state/{run_id}` | run record + remarks |
+| `training_directives/{auto}` | approved AI directives |
+| `ingestion_jobs/{job_id}` | async CSV ingestion |
+| `ingestion_progress/{run_id}` | live v2.1 ingestion progress |
+| `kb_summaries/{brand_id\|hotel_id}` | optional KB digest |
+| `admin_settings/config` | default_model + workspace LLM config |
+| `ad_insights`, `brand_usps`, `historical_ads` | legacy v1 collections (still read by fallbacks) |
+
+## BigQuery — `vantage.*`
+
+| Table | Key columns |
+|---|---|
+| `ad_performance_events` | brand_id, platform, campaign_id, headline, description, ctr, cpc, roas, impressions, date, training_run_id, model_version, ingested_at, campaign_type, ad_strength, hour_of_day, day_of_week, month, season, performance_score, confidence_weight, recency_decay, ctr_normalized, generation_id, app_version |
+| `generation_audit` | timestamp, brand_id, user_id, platform, model, tokens_in, tokens_out, latency_ms, ad_content_hash, training_run_id, request_type, generation_id, app_version, scope, hotel_id, status, error_message |
+| `training_audit`, `safety_events` | provisioned, lightly used |
