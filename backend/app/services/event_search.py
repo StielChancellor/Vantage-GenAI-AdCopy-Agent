@@ -83,8 +83,11 @@ Use your web search results to provide accurate dates and current information. R
         from vertexai.generative_models import Tool, grounding
 
         search_tool = Tool.from_google_search_retrieval(grounding.GoogleSearchRetrieval())
+        # Google Search grounding is a Vertex/Gemini-only tool. Pin to Gemini
+        # regardless of the admin-selected default (Claude adapter doesn't
+        # support Vertex tools).
         model = get_generative_model(
-            _get_admin_model(),
+            "gemini-3.1-pro-preview",
             system_instruction="You are a travel industry event expert. Use Google Search to find real upcoming events. Return ONLY valid JSON array, no markdown.",
             tools=[search_tool],
         )

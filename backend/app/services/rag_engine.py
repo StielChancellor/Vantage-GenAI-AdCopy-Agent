@@ -304,6 +304,143 @@ def _fetch_documents_by_ids(doc_ids: list[str]) -> list[dict]:
         return []
 
 
+async def retrieve_visual_inspiration(
+    theme_text: str,
+    selection: dict | None = None,
+    top_k: int = 8,
+) -> dict:
+    """v2.7 — Retrieve past creative-asset captions for the Campaign Ideation
+    shortlist generator. Mirrors `retrieve_ad_insights` scoping rules:
+
+      - scope='brand' | 'hotel' | 'multi' | 'city' → pull only that brand(s)'
+        creative_assets.
+      - scope='loyalty' (or selection.is_loyalty=True) → fan out across up to
+        8 partner brands and anonymize the resulting passages.
+
+    Returns a dict shaped:
+      {
+        assets: [ { id, brand_id, caption_json, headline, body, ... }, ... ],
+        loyalty_mode: bool,
+        anonymized: bool,
+      }
+    """
+    selection = selection or {}
+    scope = selection.get("scope") or "hotel"
+    is_loyalty = bool(selection.get("is_loyalty")) or scope == "loyalty"
+
+    brand_ids: list[str] = []
+    primary_brand_id = selection.get("brand_id") or ""
+    if primary_brand_id:
+        brand_ids.append(primary_brand_id)
+    brand_ids.extend([b for b in (selection.get("brand_ids") or []) if b and b not in brand_ids])
+
+    hotel_ids: list[str] = []
+    if selection.get("hotel_id"):
+        hotel_ids.append(selection["hotel_id"])
+    hotel_ids.extend([h for h in (selection.get("hotel_ids") or []) if h and h not in hotel_ids])
+
+    cities = list(selection.get("cities") or [])
+
+    try:
+        from backend.app.core.database import get_firestore
+        db = get_firestore()
+    except Exception as exc:
+        logger.warning("retrieve_visual_inspiration: Firestore unavailable: %s", exc)
+        return {"assets": [], "loyalty_mode": is_loyalty, "anonymized": False}
+
+    matched_brands: set[str] = set(brand_ids)
+
+    if hotel_ids:
+        for hid in hotel_ids:
+            try:
+                d = db.collection("hotels").document(hid).get()
+                if d.exists:
+                    b = (d.to_dict() or {}).get("brand_id")
+                    if b:
+                        matched_brands.add(b)
+            except Exception:
+                pass
+
+    if cities and not matched_brands:
+        try:
+            for d in db.collection("hotels").where("city", "in", cities[:10]).stream():
+                b = (d.to_dict() or {}).get("brand_id")
+                if b:
+                    matched_brands.add(b)
+        except Exception:
+            pass
+
+    assets: list[dict] = []
+
+    def _pull_brand(bid: str, cap: int) -> list[dict]:
+        try:
+            stream = (
+                db.collection("creative_assets")
+                .where("brand_id", "==", bid)
+                .limit(cap)
+                .stream()
+            )
+            return [{"id": doc.id, **(doc.to_dict() or {})} for doc in stream]
+        except Exception as exc:
+            logger.debug("creative_assets fetch failed for %s: %s", bid, exc)
+            return []
+
+    if is_loyalty:
+        # Pull anonymized exemplars across up to 8 non-loyalty partner brands.
+        try:
+            partner_ids: list[str] = []
+            for d in db.collection("brands").stream():
+                bdata = d.to_dict() or {}
+                if bdata.get("kind", "hotel") == "loyalty":
+                    continue
+                partner_ids.append(d.id)
+            for pid in partner_ids[:8]:
+                per = _pull_brand(pid, max(2, top_k // 4))
+                assets.extend(per[:2])
+        except Exception as exc:
+            logger.debug("loyalty fan-out failed: %s", exc)
+        # Anonymize each
+        anon: list[dict] = []
+        for a in assets:
+            anon.append(_anonymize_passage(a, extra_terms=[a.get("hotel_name")]))
+        assets = anon
+    else:
+        for bid in list(matched_brands)[:5]:
+            assets.extend(_pull_brand(bid, max(3, top_k // 2)))
+
+    # Light ranking: prefer assets whose theme/season/captions overlap the theme_text.
+    if theme_text:
+        theme_lower = theme_text.lower()
+
+        def _score(a: dict) -> int:
+            cap = a.get("caption_json") or {}
+            haystack = " ".join(str(v) for v in [
+                cap.get("mood"),
+                cap.get("theme_hint"),
+                cap.get("season_hint"),
+                cap.get("hero_subject"),
+                " ".join(cap.get("motifs") or []) if isinstance(cap.get("motifs"), list) else "",
+                " ".join(cap.get("palette_tokens") or []) if isinstance(cap.get("palette_tokens"), list) else "",
+                a.get("campaign_name"),
+                a.get("season"),
+                a.get("theme"),
+                a.get("headline"),
+            ] if v).lower()
+            score = 0
+            for token in [t for t in theme_lower.replace(",", " ").split() if len(t) > 3]:
+                if token in haystack:
+                    score += 1
+            return score
+
+        assets.sort(key=_score, reverse=True)
+
+    return {
+        "assets": assets[:top_k],
+        "loyalty_mode": is_loyalty,
+        "anonymized": is_loyalty,
+    }
+
+
 def _firestore_fallback_insights(hotel_name: str) -> dict:
     """Original v1 keyword search — used when Vector Search unavailable."""
     try:

@@ -514,3 +514,116 @@ class CampaignGenerateResponse(BaseModel):
     total_tokens: int = 0
     total_cost_inr: float = 0.0
     time_seconds: float = 0.0
+
+
+# ── Campaign Ideation (v2.7) ──────────────────────────
+# Upstream tool that produces a 10-item shortlist of campaign concepts from a
+# free-text theme + critique chat, grounded in past static creative trained
+# via the `creative_assets` adapter. Selecting one shortlist item creates a
+# draft `unified_campaigns` doc so the user continues into lock → fan-out.
+
+class IdeationStartRequest(BaseModel):
+    theme_text: str
+    date_start: Optional[str] = ""
+    date_end: Optional[str] = ""
+    selection: PropertySelection
+
+
+class IdeationAnswerRequest(BaseModel):
+    answer_text: str
+
+
+class CritiqueTurn(BaseModel):
+    q: str
+    a: str = ""
+    ts: Optional[str] = None
+
+
+class ShortlistItem(BaseModel):
+    name: str                                  # ≤ 8 words
+    tagline: str                               # ≤ 12 words
+    story_line: str                            # 2–4 sentences
+    visual_direction: str                      # prompt-ready paragraph
+    inspiration_asset_ids: list[str] = []      # not surfaced in Phase 1 UI
+
+
+class IdeationState(BaseModel):
+    id: str
+    user_id: str = ""
+    user_email: str = ""
+    selection: Optional[PropertySelection] = None
+    theme_text: str = ""
+    date_start: Optional[str] = ""
+    date_end: Optional[str] = ""
+    phase: Literal["critique", "shortlist", "chosen", "archived"] = "critique"
+    critique_turns: list[CritiqueTurn] = []
+    captured: dict = {}                        # {audience, hero_offer, tone, must_mention, must_avoid, ...}
+    shortlist: list[ShortlistItem] = []
+    chosen_index: Optional[int] = None
+    linked_campaign_id: Optional[str] = None
+    app_version: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class IdeationStartResponse(BaseModel):
+    ideation_id: str
+    next_question: str
+    ready_for_shortlist: bool = False
+
+
+class IdeationAnswerResponse(BaseModel):
+    next_question: Optional[str] = None
+    ready_for_shortlist: bool = False
+    captured: dict = {}
+
+
+class IdeationShortlistResponse(BaseModel):
+    shortlist: list[ShortlistItem]
+    tokens_used: int = 0
+    model_used: str = ""
+
+
+class IdeationChooseRequest(BaseModel):
+    index: int
+
+
+class IdeationChooseResponse(BaseModel):
+    ideation_id: str
+    chosen_index: int
+    unified_campaign_id: str
+
+
+# ── Creative Assets (training corpus for ideation) ────
+class CreativeAssetRecord(BaseModel):
+    id: str
+    brand_id: str
+    hotel_id: Optional[str] = None
+    pack_id: str
+    image_filename: str
+    gcs_path: str
+    signed_url: Optional[str] = None           # populated on read only
+    campaign_name: Optional[str] = ""
+    season: Optional[str] = ""
+    theme: Optional[str] = ""
+    date_start: Optional[str] = ""
+    date_end: Optional[str] = ""
+    headline: str = ""
+    body: str = ""
+    cta: Optional[str] = ""
+    platform: Optional[str] = ""
+    persona: Optional[str] = ""
+    hero_offer: Optional[str] = ""
+    caption_json: dict = {}
+    embedding_id: Optional[str] = ""
+    ingested_by: Optional[str] = ""
+    ingested_at: Optional[str] = ""
+
+
+class CreativePackUploadResponse(BaseModel):
+    run_id: str
+    pack_id: str
+    brand_id: str
+    images_found: int
+    rows_in_manifest: int
+    status: str                                # "started" | "completed" | "failed"

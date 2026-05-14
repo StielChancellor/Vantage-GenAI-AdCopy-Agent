@@ -1,6 +1,6 @@
 # Vantage GenAI Ad Copy Agent
 
-App: 2.6 — last live: 2026-05-11
+App: 2.7 — last live: 2026-05-14
 An enterprise-grade, AI-powered marketing platform for ad copy generation and CRM campaign management. Leverages Google Gemini AI with pre-processed performance insights to produce platform-optimized advertising copy and manage marketing calendars.
 
 **Live Demo:** [vantage-adcopy-agent](https://vantage-adcopy-agent-566761437172.asia-south1.run.app)

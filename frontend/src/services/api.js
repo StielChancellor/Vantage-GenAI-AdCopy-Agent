@@ -135,6 +135,36 @@ export const getCampaign = (id) => api.get(`/campaigns/${encodeURIComponent(id)}
 export const patchCampaign = (id, data) => api.patch(`/campaigns/${encodeURIComponent(id)}`, data);
 export const generateCampaign = (id, data) => api.post(`/campaigns/${encodeURIComponent(id)}/generate`, data, { timeout: 600000 });
 
+// Campaign Ideation (v2.7)
+export const startIdeation = (data) => api.post('/ideation/start', data);
+export const answerIdeation = (id, answerText) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/answer`, { answer_text: answerText });
+export const generateShortlist = (id) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/shortlist`, {}, { timeout: 600000 });
+export const chooseShortlist = (id, index) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/choose`, { index });
+export const getIdeation = (id) => api.get(`/ideation/${encodeURIComponent(id)}`);
+export const listIdeations = (limit = 30) => api.get(`/ideation?limit=${limit}`);
+export const archiveIdeation = (id) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/archive`);
+
+// Creative assets (admin training corpus for ideation)
+export const uploadCreativePack = (file, brandId, runId = '', packId = '') => {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('brand_id', brandId);
+  if (runId) form.append('run_id', runId);
+  if (packId) form.append('pack_id', packId);
+  return api.post('/training/creative-assets/upload', form, { timeout: 900000 });
+};
+export const listCreativeAssets = ({ brandId = '', packId = '', limit = 50 } = {}) => {
+  const params = new URLSearchParams();
+  if (brandId) params.append('brand_id', brandId);
+  if (packId) params.append('pack_id', packId);
+  params.append('limit', String(limit));
+  return api.get(`/training/creative-assets?${params.toString()}`);
+};
+
 // Copilot
 export const copilotChat = (data) => api.post('/copilot/chat', data);
 export const saveBrief = (data) => api.post('/copilot/briefs/save', data);

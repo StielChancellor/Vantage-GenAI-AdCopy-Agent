@@ -54,6 +54,94 @@ def _read_csv_robust(contents: bytes) -> pd.DataFrame:
     )
 
 
+@router.post("/creative-assets/upload")
+async def upload_creative_pack(
+    file: UploadFile = File(...),
+    brand_id: str = Form(...),
+    run_id: str = Form(""),
+    pack_id: str = Form(""),
+    _user=Depends(require_admin),
+):
+    """v2.7 — Upload a campaign-pack zip (images + ad_copies.xlsx).
+
+    The zip is parsed, each image is captioned via Gemini Vision, the
+    `caption + headline + body` is embedded, and a `creative_assets/{id}`
+    Firestore doc is written per image. Live progress lands in
+    `ingestion_progress/{run_id}` — the existing training-progress endpoint
+    works unchanged.
+    """
+    from backend.app.services.ingestion.adapters import ingest_creative_pack
+
+    if not file or not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(400, "Upload a .zip with images + ad_copies.xlsx.")
+    if not brand_id:
+        raise HTTPException(400, "brand_id is required.")
+
+    zip_bytes = await file.read()
+    if not zip_bytes:
+        raise HTTPException(400, "Empty file.")
+
+    rid = run_id or str(uuid.uuid4())
+    pid = pack_id or uuid.uuid4().hex[:12]
+
+    def _progress(phase, percent, message, processed=0, total=0, status="running"):
+        _update_progress(rid, phase, percent, message, processed=processed, total=total, status=status)
+
+    try:
+        result = await ingest_creative_pack(
+            zip_bytes=zip_bytes,
+            brand_id=brand_id,
+            user_id=_user.get("uid", "unknown"),
+            user_email=_user.get("sub", ""),
+            run_id=rid,
+            pack_id=pid,
+            progress_cb=_progress,
+        )
+    except Exception as exc:
+        logger.exception("creative-asset ingest failed for run %s: %s", rid, exc)
+        _update_progress(rid, "failed", 0, f"Failed: {exc}", status="failed")
+        raise HTTPException(500, f"Pack ingest failed: {exc}")
+
+    return {"run_id": rid, **result}
+
+
+@router.get("/creative-assets")
+async def list_creative_assets(
+    brand_id: str = "",
+    pack_id: str = "",
+    limit: int = 50,
+    _user=Depends(require_admin),
+):
+    """List ingested creative-asset records, newest first, optionally filtered
+    by brand or pack. Signed read URLs are attached on the fly (1-hour TTL)."""
+    from backend.app.services.storage.gcs_client import signed_read_url
+
+    db = get_firestore()
+    coll = db.collection("creative_assets")
+    if brand_id:
+        coll = coll.where("brand_id", "==", brand_id)
+    if pack_id:
+        coll = coll.where("pack_id", "==", pack_id)
+    try:
+        stream = coll.order_by("ingested_at", direction="DESCENDING").limit(limit).stream()
+        docs = list(stream)
+    except Exception:
+        docs = list(coll.limit(max(limit * 3, 30)).stream())
+        docs.sort(key=lambda d: (d.to_dict() or {}).get("ingested_at", ""), reverse=True)
+        docs = docs[:limit]
+
+    out: list[dict] = []
+    for d in docs:
+        data = d.to_dict() or {}
+        gcs_path = data.get("gcs_path", "")
+        out.append({
+            "id": d.id,
+            **data,
+            "signed_url": signed_read_url(gcs_path) if gcs_path else "",
+        })
+    return {"assets": out}
+
+
 @router.get("/progress/{run_id}")
 async def get_training_progress(run_id: str, _user=Depends(require_admin)):
     """Live progress for an in-flight v2.1 ingestion run. Polled by the

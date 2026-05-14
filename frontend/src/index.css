@@ -2807,3 +2807,24 @@ label {
   .freq-row { flex-direction: column; align-items: flex-start; }
   .freq-row select { width: 100%; }
 }
+
+/* ── Campaign Ideation (v2.7) ──────────────────────── */
+.critique-history { display: flex; flex-direction: column; gap: 0.75rem; margin: 0.5rem 0 1rem; }
+.critique-turn { padding: 0.75rem 1rem; border-left: 2px solid var(--em-ink-faint, #d8d2c8); }
+.critique-q { display: flex; align-items: center; gap: 0.4rem; font-weight: 600; color: var(--em-ink, #1f1d1a); margin-bottom: 0.25rem; }
+.critique-a { color: var(--em-ink-soft, #6e6a62); white-space: pre-wrap; }
+.critique-current { margin-top: 0.5rem; padding: 1rem; border: 1px solid var(--em-ink-faint, #d8d2c8); border-radius: 6px; background: var(--em-bg-soft, #faf7f2); }
+.critique-current textarea { width: 100%; margin-top: 0.5rem; }
+
+.shortlist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin: 1rem 0; }
+.shortlist-card { padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.shortlist-card-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.shortlist-card-head h3 { margin: 0; font-size: 1.05rem; }
+.shortlist-card-num { font-family: var(--em-mono, monospace); font-size: 0.75rem; color: var(--em-ink-soft, #6e6a62); }
+.shortlist-tagline { margin: 0; font-style: italic; color: var(--em-ink, #1f1d1a); }
+.shortlist-section { display: flex; flex-direction: column; gap: 0.2rem; }
+.shortlist-section p { margin: 0; font-size: 0.92rem; color: var(--em-ink-soft, #6e6a62); }
+.shortlist-card-foot { margin-top: auto; padding-top: 0.5rem; display: flex; justify-content: flex-end; }
+
+@keyframes em-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin { animation: em-spin 0.9s linear infinite; }

@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../contexts/ThemeContext';
 import { logout as apiLogout } from '../services/api';
-import { Zap, Megaphone, Mail, Settings, LogOut, Sun, Moon, User, Building, BookOpen, Home, Calendar } from 'lucide-react';
+import { Zap, Megaphone, Mail, Settings, LogOut, Sun, Moon, User, Building, BookOpen, Home, Calendar, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { APP_VERSION, APP_VERSION_DATE } from '../version';
 import TweaksPanel from './TweaksPanel';
 
@@ -37,6 +37,10 @@ export default function AppLayout() {
             <Home size={18} />
             <span>Home</span>
           </NavLink>
+          <NavLink to="/ideation" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+            <Sparkles size={18} />
+            <span>Campaign Ideation</span>
+          </NavLink>
           <NavLink to="/unified" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Zap size={18} />
             <span>Unified Campaign</span>
@@ -64,6 +68,10 @@ export default function AppLayout() {
               <NavLink to="/admin" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
                 <Settings size={18} />
                 <span>Users & Settings</span>
+              </NavLink>
+              <NavLink to="/admin/creative-assets" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+                <ImageIcon size={18} />
+                <span>Creative Assets</span>
               </NavLink>
             </>
           )}

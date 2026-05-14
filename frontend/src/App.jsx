@@ -12,9 +12,11 @@ import AppLayout from './components/AppLayout';
 import MyAccount from './pages/MyAccount';
 import HotelsIngestion from './pages/admin/HotelsIngestion';
 import KnowledgeBase from './pages/admin/KnowledgeBase';
+import CreativeAssets from './pages/admin/CreativeAssets';
 import Hub from './pages/Hub';
 import MarketingCalendar from './pages/MarketingCalendar';
 import UnifiedCampaign from './pages/UnifiedCampaign';
+import CampaignIdeation from './pages/CampaignIdeation';
 import './styles/editorial-mono.css';
 
 function ProtectedRoute({ children }) {
@@ -46,10 +48,12 @@ function AppRoutes() {
         <Route path="/crm" element={<CRMWizard />} />
         <Route path="/calendar" element={<MarketingCalendar />} />
         <Route path="/unified" element={<UnifiedCampaign />} />
+        <Route path="/ideation" element={<CampaignIdeation />} />
         <Route path="/account" element={<MyAccount />} />
         <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
         <Route path="/admin/hotels" element={<RequireAdmin><HotelsIngestion /></RequireAdmin>} />
         <Route path="/admin/knowledge" element={<RequireAdmin><KnowledgeBase /></RequireAdmin>} />
+        <Route path="/admin/creative-assets" element={<RequireAdmin><CreativeAssets /></RequireAdmin>} />
       </Route>
 
       {/* Backward compatibility redirect */}

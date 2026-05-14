@@ -16,10 +16,13 @@ from backend.app.services.ad_generator import generate_ad_copy, refine_ad_copy
 
 # Cost calculation: USD per 1M tokens
 MODEL_PRICING = {
+    "gemini-3.1-pro-preview": {"input": 3.50, "output": 14.00},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
     "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
     "gemini-2.5-flash-lite": {"input": 0.075, "output": 0.30},
-    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
     "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
+    # Anthropic Claude via Vertex AI Model Garden — same audit/billing path.
+    "claude-opus-4-7": {"input": 15.00, "output": 75.00},
 }
 USD_TO_INR = 85.0
 

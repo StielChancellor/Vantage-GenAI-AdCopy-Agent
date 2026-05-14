@@ -11,6 +11,9 @@ google-cloud-firestore==2.20.1
 # Vertex AI — replaces google-generativeai (consumer SDK)
 google-cloud-aiplatform>=1.60.0
 
+# Anthropic Claude via Vertex AI Model Garden
+anthropic[vertex]>=0.40.0
+
 # GCP services
 google-cloud-secret-manager>=2.20.0
 google-cloud-storage>=2.14.0
@@ -26,6 +29,7 @@ lxml==5.3.0
 # CSV/Data
 pandas==2.2.3
 numpy>=1.26.0
+openpyxl>=3.1.0
 
 # Auth
 PyJWT==2.10.1
