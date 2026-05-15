@@ -53,16 +53,18 @@ _CLAUDE_VERTEX_IDS: dict[str, str] = {}
 
 def _claude_vertex_id(model_name: str) -> str:
     """Resolve a friendly Claude id to the Vertex publisher id Anthropic
-    actually accepts (e.g. `claude-opus-4-7@20251101`)."""
+    actually accepts. Confirmed via direct probe (2026-05-15): Anthropic's
+    Vertex publisher endpoint accepts the bare id (no `@date` suffix).
+    Env overrides are kept in case Anthropic later requires a dated form."""
     if not _CLAUDE_VERTEX_IDS:
         _CLAUDE_VERTEX_IDS["claude-opus-4-7"] = os.environ.get(
-            "CLAUDE_OPUS_4_7_VERTEX_ID", "claude-opus-4-7@20251101",
+            "CLAUDE_OPUS_4_7_VERTEX_ID", "claude-opus-4-7",
         )
-        _CLAUDE_VERTEX_IDS["claude-sonnet-4-6"] = os.environ.get(
-            "CLAUDE_SONNET_4_6_VERTEX_ID", "claude-sonnet-4-6@20251015",
+        _CLAUDE_VERTEX_IDS["claude-sonnet-4-5"] = os.environ.get(
+            "CLAUDE_SONNET_4_5_VERTEX_ID", "claude-sonnet-4-5",
         )
         _CLAUDE_VERTEX_IDS["claude-haiku-4-5"] = os.environ.get(
-            "CLAUDE_HAIKU_4_5_VERTEX_ID", "claude-haiku-4-5-20251001",
+            "CLAUDE_HAIKU_4_5_VERTEX_ID", "claude-haiku-4-5",
         )
     return _CLAUDE_VERTEX_IDS.get(model_name, model_name)
 
