@@ -12,7 +12,6 @@ import AppLayout from './components/AppLayout';
 import MyAccount from './pages/MyAccount';
 import HotelsIngestion from './pages/admin/HotelsIngestion';
 import KnowledgeBase from './pages/admin/KnowledgeBase';
-import CreativeAssets from './pages/admin/CreativeAssets';
 import Hub from './pages/Hub';
 import MarketingCalendar from './pages/MarketingCalendar';
 import UnifiedCampaign from './pages/UnifiedCampaign';
@@ -53,7 +52,8 @@ function AppRoutes() {
         <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
         <Route path="/admin/hotels" element={<RequireAdmin><HotelsIngestion /></RequireAdmin>} />
         <Route path="/admin/knowledge" element={<RequireAdmin><KnowledgeBase /></RequireAdmin>} />
-        <Route path="/admin/creative-assets" element={<RequireAdmin><CreativeAssets /></RequireAdmin>} />
+        {/* Legacy redirect — Creative Assets now lives under Admin → Training */}
+        <Route path="/admin/creative-assets" element={<Navigate to="/admin" replace />} />
       </Route>
 
       {/* Backward compatibility redirect */}

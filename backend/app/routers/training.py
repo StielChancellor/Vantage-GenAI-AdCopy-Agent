@@ -83,6 +83,8 @@ async def upload_creative_pack(
 
     rid = run_id or str(uuid.uuid4())
     pid = pack_id or uuid.uuid4().hex[:12]
+    started_at = datetime.now(timezone.utc)
+    start_time = time.time()
 
     def _progress(phase, percent, message, processed=0, total=0, status="running"):
         _update_progress(rid, phase, percent, message, processed=processed, total=total, status=status)
@@ -102,7 +104,53 @@ async def upload_creative_pack(
         _update_progress(rid, "failed", 0, f"Failed: {exc}", status="failed")
         raise HTTPException(500, f"Pack ingest failed: {exc}")
 
-    return {"run_id": rid, **result}
+    # Persist a Sessions-row-shaped doc so the run shows up in the Training
+    # Sessions table with cost / tokens / time — mirrors the legacy CSV path.
+    elapsed = round(time.time() - start_time, 2)
+    cap_in = int(result.get("caption_input_tokens", 0))
+    cap_out = int(result.get("caption_output_tokens", 0))
+    cap_model = str(result.get("caption_model", "gemini-3.1-pro-preview"))
+    embed_chars = int(result.get("embed_chars", 0))
+    embed_tokens = embed_chars // 4 if embed_chars else 0
+
+    # Captioning cost uses the proper Gemini pricing from the central map;
+    # embedding cost stays on the existing $0.025-per-1M flat rate.
+    try:
+        from backend.app.core.vertex_client import calculate_cost_inr as _calc_cost
+        caption_cost = _calc_cost(cap_model, cap_in, cap_out)
+    except Exception:
+        caption_cost = 0.0
+    embed_cost = _embed_cost_inr(embed_tokens)
+    total_cost = round(float(caption_cost) + float(embed_cost), 4)
+
+    directive_preview = {
+        "format": "creative_assets",
+        "pack_id": pid,
+        "brand_id": brand_id,
+        "images_found": int(result.get("images_found", 0)),
+        "rows_in_manifest": int(result.get("rows_in_manifest", 0)),
+        "written": int(result.get("written", 0)),
+        "caption_input_tokens": cap_in,
+        "caption_output_tokens": cap_out,
+        "caption_model": cap_model,
+        "embed_chars": embed_chars,
+        "embed_tokens_est": embed_tokens,
+        "caption_cost_inr": caption_cost,
+        "embed_cost_inr": embed_cost,
+        "errors": result.get("errors", [])[:10],
+    }
+
+    _persist_session(
+        rid, "creative_assets", brand_id, _user.get("uid", "unknown"),
+        directive_preview, started_at, elapsed,
+        input_tokens=cap_in + embed_tokens, cost_inr=total_cost,
+        remarks=f"Creative-asset pack {pid} — {result.get('written', 0)} assets",
+        model_used=cap_model,
+        training_mode="zip_upload",
+        output_tokens=cap_out,
+    )
+
+    return {"run_id": rid, "session_id": rid, "cost_inr": total_cost, **result}
 
 
 @router.get("/creative-assets")
@@ -446,6 +494,9 @@ def _persist_session(
     input_tokens: int,
     cost_inr: float,
     remarks: str = "",
+    model_used: str | None = None,
+    training_mode: str = "csv_only",
+    output_tokens: int = 0,
 ) -> None:
     """Write a Sessions-row-shaped doc to Firestore so the v2.1 ingestion run
     appears in the Training → Sessions table with cost, time, tokens, etc."""
@@ -455,7 +506,7 @@ def _persist_session(
         db.collection("training_state").document(training_run_id).set({
             "session_id": training_run_id,
             "section_type": section_type,
-            "training_mode": "csv_only",
+            "training_mode": training_mode,
             "status": "approved",  # Deterministic ingestion is auto-approved
             "directive_preview": directive_preview,
             "questions": [],
@@ -464,10 +515,10 @@ def _persist_session(
             "user_id": user_id,
             "save_mode": "append",
             "input_tokens": int(input_tokens),
-            "output_tokens": 0,
+            "output_tokens": int(output_tokens),
             "time_seconds": float(elapsed_seconds),
             "cost_inr": float(cost_inr),
-            "model_used": _EMBED_MODEL,
+            "model_used": model_used or _EMBED_MODEL,
             "remarks": (remarks or "")[:1000],
             "created_at": started_at.isoformat(),
             "completed_at": completed_at.isoformat(),

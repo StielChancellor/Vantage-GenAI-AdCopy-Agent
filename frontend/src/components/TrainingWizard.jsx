@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   startTraining, getTrainingProgress, answerTraining, getTrainingSessions,
-  deleteTrainingSession, exportTrainingSessions,
+  deleteTrainingSession, exportTrainingSessions, uploadCreativePack,
 } from '../services/api';
 import toast from 'react-hot-toast';
 import {
   Upload, CheckCircle, XCircle, MessageSquare, Trash2,
-  Download, FileText, Type, FileSpreadsheet, Star,
+  Download, FileText, Type, FileSpreadsheet, Star, Image as ImageIcon,
 } from 'lucide-react';
+import IntelligentPropertyPicker from './IntelligentPropertyPicker';
 
 const SECTION_TYPES = [
   { value: 'google_ads_export', label: 'Google Ads Export (Editor CSV)', icon: '🔍' },
@@ -15,6 +16,7 @@ const SECTION_TYPES = [
   { value: 'ad_performance', label: 'Ad Performance (generic)', icon: '📊' },
   { value: 'brand_usp', label: 'Brand & USP', icon: '🏨' },
   { value: 'crm_performance', label: 'CRM Performance', icon: '📱' },
+  { value: 'creative_assets', label: 'Creative Assets (Zip + Manifest)', icon: '🖼️' },
 ];
 
 const TRAINING_MODES = [
@@ -37,6 +39,12 @@ export default function TrainingWizard() {
   const [kpiColumns, setKpiColumns] = useState([]);
   const [heroColumns, setHeroColumns] = useState([]);
   const fileInputRef = useRef(null);
+
+  // Creative-asset (zip) upload state
+  const [zipFile, setZipFile] = useState(null);
+  const [creativeBrandSel, setCreativeBrandSel] = useState(null);
+  const zipInputRef = useRef(null);
+  const isCreativeAssets = sectionType === 'creative_assets';
 
   // Training session state
   const [session, setSession] = useState(null);
@@ -132,6 +140,45 @@ export default function TrainingWizard() {
   };
 
   const handleUpload = async () => {
+    // Creative-asset (zip) path — different inputs from the CSV/text flow.
+    if (isCreativeAssets) {
+      if (!zipFile) {
+        toast.error('Please select a .zip file');
+        return;
+      }
+      const brandId = (creativeBrandSel?.brand_ids || [])[0] || creativeBrandSel?.brand_id || '';
+      if (!brandId) {
+        toast.error('Pick a single brand — creative assets are scoped per brand.');
+        return;
+      }
+      const runId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setUploading(true);
+      setProgress({ percent: 0, phase: 'starting', message: 'Uploading zip…', status: 'running' });
+      startProgressPolling(runId);
+      try {
+        const res = await uploadCreativePack(zipFile, brandId, runId);
+        stopProgressPolling();
+        setProgress({ percent: 100, phase: 'completed', message: 'Captioning complete', status: 'completed' });
+        const data = res.data || {};
+        toast.success(
+          `Ingested ${data.written ?? 0} / ${data.rows_in_manifest ?? 0} assets · cost ₹${(data.cost_inr ?? 0).toFixed(4)}`,
+          { duration: 8000 }
+        );
+        setZipFile(null);
+        if (zipInputRef.current) zipInputRef.current.value = '';
+        loadSessions();
+      } catch (err) {
+        stopProgressPolling();
+        setProgress({ percent: 0, phase: 'failed', message: err.response?.data?.detail || 'Upload failed', status: 'failed' });
+        toast.error(err.response?.data?.detail || 'Upload failed');
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
     if (trainingMode !== 'text_only' && !csvFile) {
       toast.error('Please select a CSV file');
       return;
@@ -287,8 +334,8 @@ export default function TrainingWizard() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const needsCSV = trainingMode !== 'text_only';
-  const needsText = trainingMode !== 'csv_only';
+  const needsCSV = !isCreativeAssets && trainingMode !== 'text_only';
+  const needsText = !isCreativeAssets && trainingMode !== 'csv_only';
   const showCsvOptions = needsCSV && csvColumns.length > 0;
 
   return (
@@ -317,29 +364,64 @@ export default function TrainingWizard() {
           </div>
         </div>
 
-        {/* Training Mode */}
-        <div className="form-group">
-          <label>Training Mode</label>
-          <div className="training-mode-grid">
-            {TRAINING_MODES.map((m) => {
-              const Icon = m.icon;
-              return (
-                <button
-                  key={m.value}
-                  className={`training-mode-card ${trainingMode === m.value ? 'active' : ''}`}
-                  onClick={() => setTrainingMode(m.value)}
-                >
-                  <Icon size={20} />
-                  <span className="training-mode-label">{m.label}</span>
-                  <span className="training-mode-desc">{m.desc}</span>
-                </button>
-              );
-            })}
+        {/* Training Mode (hidden for creative_assets — that path is zip-only) */}
+        {!isCreativeAssets && (
+          <div className="form-group">
+            <label>Training Mode</label>
+            <div className="training-mode-grid">
+              {TRAINING_MODES.map((m) => {
+                const Icon = m.icon;
+                return (
+                  <button
+                    key={m.value}
+                    className={`training-mode-card ${trainingMode === m.value ? 'active' : ''}`}
+                    onClick={() => setTrainingMode(m.value)}
+                  >
+                    <Icon size={20} />
+                    <span className="training-mode-label">{m.label}</span>
+                    <span className="training-mode-desc">{m.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* CSV Upload */}
-        {needsCSV && (
+        {/* Creative-asset (zip) — brand picker + zip input */}
+        {isCreativeAssets && (
+          <>
+            <div className="form-group">
+              <label>Brand *</label>
+              <IntelligentPropertyPicker
+                value={creativeBrandSel}
+                onChange={setCreativeBrandSel}
+                scopeSummary={null}
+                placeholder="Pick the brand this pack belongs to…"
+              />
+              <p style={{ fontSize: 12, color: 'var(--text-muted, #6b7280)', marginTop: 4 }}>
+                One brand per pack. Mixed-brand zips must be uploaded separately so ideation retrieval stays scoped correctly.
+              </p>
+            </div>
+            <div className="form-group">
+              <label>Pack Zip *</label>
+              <input
+                ref={zipInputRef}
+                type="file"
+                accept=".zip"
+                onChange={(e) => setZipFile(e.target.files?.[0] || null)}
+                disabled={uploading}
+              />
+              <p style={{ fontSize: 12, color: 'var(--text-muted, #6b7280)', marginTop: 4 }}>
+                Zip layout: images at the root + <code>ad_copies.xlsx</code> with columns{' '}
+                <code>image_filename, headline, body</code> (optional: <code>cta, platform, persona, hero_offer, campaign_name, season, theme</code>).
+                Each image is captioned by Gemini Vision and the cost is recorded under Training Sessions.
+              </p>
+            </div>
+          </>
+        )}
+
+        {/* CSV Upload (legacy CSV/text paths only) */}
+        {!isCreativeAssets && needsCSV && (
           <div className="form-group">
             <label>CSV File</label>
             <input

@@ -186,20 +186,25 @@ _CAPTION_SCHEMA_HINT = {
 }
 
 
-async def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
-    """Single Gemini Vision call returning a captioning JSON dict.
+_CAPTION_MODEL = "gemini-3.1-pro-preview"
 
-    Robust to malformed output — falls back to an empty dict so the pipeline
-    keeps moving even when one image trips the model.
+
+async def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[dict, int, int]:
+    """Single Gemini Vision call returning (caption_json, input_tokens, output_tokens).
+
+    Robust to malformed output — falls back to ({}, 0, 0) on any error so the
+    pipeline keeps moving even when one image trips the model.
     """
     try:
         from vertexai.generative_models import Part
-        from backend.app.core.vertex_client import get_generative_model
+        from backend.app.core.vertex_client import (
+            get_generative_model, extract_token_counts,
+        )
 
         # Captioning is multimodal — pin to a Gemini vision model regardless of
         # the admin-selected default (Claude adapter is text-only on this path).
         model = get_generative_model(
-            model_name="gemini-3.1-pro-preview",
+            model_name=_CAPTION_MODEL,
             system_instruction=_CAPTION_SYSTEM,
         )
         prompt = (
@@ -210,11 +215,12 @@ async def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> di
         image_part = Part.from_data(data=image_bytes, mime_type=mime_type)
         response = model.generate_content([image_part, prompt])
         text = getattr(response, "text", "") or ""
+        in_tok, out_tok = extract_token_counts(response)
     except Exception as exc:
         logger.warning("caption_image vision call failed: %s", exc)
-        return {}
+        return {}, 0, 0
 
-    return _parse_caption_json(text)
+    return _parse_caption_json(text), int(in_tok), int(out_tok)
 
 
 def _parse_caption_json(text: str) -> dict:
@@ -286,6 +292,11 @@ async def ingest_creative_pack(
     db = get_firestore()
     written = 0
     errors: list[str] = list(contents.errors)
+    # Token + char accounting so the parent can persist a Sessions row with
+    # cost_inr / input_tokens like every other v2.1 training run.
+    total_in_tokens = 0
+    total_out_tokens = 0
+    total_embed_chars = 0
 
     # Match images case-insensitively for resilience.
     image_index = {name.lower(): (name, data) for name, data in contents.images.items()}
@@ -309,7 +320,9 @@ async def ingest_creative_pack(
             continue
 
         try:
-            caption = await caption_image(img_bytes, mime_type=content_type)
+            caption, cap_in, cap_out = await caption_image(img_bytes, mime_type=content_type)
+            total_in_tokens += cap_in
+            total_out_tokens += cap_out
         except Exception as exc:
             logger.warning("caption call raised: %s", exc)
             caption = {}
@@ -319,6 +332,7 @@ async def ingest_creative_pack(
         cta = str(row.get("cta") or "").strip()
 
         embed_text = _build_embedding_text(caption, headline, body)
+        total_embed_chars += len(embed_text)
         embedding_id = ""
         try:
             docs = await embed_texts([embed_text], use_cache=True)
@@ -378,6 +392,11 @@ async def ingest_creative_pack(
         "written": written,
         "errors": errors[:20],
         "status": "completed",
+        # Token + char accounting for the Sessions table cost rollup.
+        "caption_input_tokens": int(total_in_tokens),
+        "caption_output_tokens": int(total_out_tokens),
+        "caption_model": _CAPTION_MODEL,
+        "embed_chars": int(total_embed_chars),
     }
 
 
