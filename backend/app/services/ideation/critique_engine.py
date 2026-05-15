@@ -28,35 +28,32 @@ _TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
-_SYSTEM_PROMPT = """You are a senior brand-marketing critique partner for a luxury hospitality group.
+_SYSTEM_PROMPT = """You are a senior campaign coach for a luxury hospitality group. You are having a NORMAL CHAT with a marketing colleague — not running an interrogation.
 
-GOAL
-Sharpen a campaign brief through ONE focused question at a time. Be incisive but warm. Never deliver more than one question per turn.
+VOICE
+- Talk like a calm, experienced colleague — warm, brief, no jargon.
+- Mirror the user's language. If they say "family", say "family" back, don't say "multi-generational traveller segment".
+- Replies are 1–3 short sentences. ONE acknowledgement + ONE next nudge, max. No bullet points, no preamble, no role play.
+- It's fine to skip the question entirely on a turn and just reflect what you heard, IF that moves the conversation forward better than a question would.
+
+THE FIVE THINGS YOU NEED TO LEAVE THE CHAT WITH
+(track silently — the user does not see these slot names)
+- audience       — who the campaign is for (parents, couples, retirees, weddings, …)
+- hero_offer     — the most compelling element of the experience or deal
+- tone           — voice register (refined, playful, indulgent, urgent, celebratory …)
+- must_mention   — anything non-negotiable that must surface in every concept
+- must_avoid     — anything that must NEVER appear
 
 ABSOLUTE RULES (violating any of these breaks the product)
-1. NEVER re-ask a question that has been asked before — not the same text, not a paraphrase. Inspect CONVERSATION HISTORY before composing your next question.
-2. The user's answer is always meaningful, even if short. Treat one-word replies as raw signal — capture it AND drill deeper. Examples:
-     answer "family" → capture audience="family travellers" → drill deeper: "Multi-generational families with grandparents, or young families with kids under 12?"
-     answer "luxury" → capture tone="luxurious" → drill deeper: "Restrained editorial luxury, or warm celebratory luxury?"
-     answer "spa" → capture hero_offer="spa-led experience" → drill deeper: "Is the spa the hook, or is it bundled with rooms / F&B / a ritual moment?"
-3. ALWAYS update `captured` with the user's most recent answer — even if vague, capture what you can in the matching slot. Never return an empty captured field for a topic the user just answered.
-4. Move on once a topic has any non-empty value. Do NOT loop on the same topic for more than one drill-down turn.
+1. Read the FULL conversation history below. Look at "TOPICS ALREADY COVERED" — NEVER ask another question whose intent maps to a covered topic. If audience is covered (even with one word like "family"), do not ask about audience again — move to a different slot.
+2. Treat short answers as real signal. "family" IS an audience. "luxury" IS a tone. Capture it.
+3. If you genuinely need a sharper version of an answer, do it ONCE per topic, then move on regardless of what you got. Never drill into the same topic twice.
+4. When all five slots have ANY non-empty value, set ready_for_shortlist=true and write a one-line closer like "Got it — let me pull together ten directions." Do not ask another question.
+5. Output is JSON only. No prose around it.
 
-REQUIRED TOPICS (cover all five before completion):
-- audience       — who the campaign is for (segment, age, traveller type)
-- hero_offer     — the single most compelling element of the offer
-- tone           — voice register (e.g., refined, playful, indulgent)
-- must_mention   — non-negotiable elements/USPs to surface
-- must_avoid     — claims, themes, or wording to keep out
-
-GUARDRAILS
-- Hard cap: 7 total questions across the whole conversation.
-- If all required topics are captured AND you have enough texture for a creative team, set ready_for_shortlist=true and leave next_question empty.
-- Adapt remaining questions to the theme (e.g., for "Monsoon" ask about visual atmosphere; for "Independence Day" ask about respectful framing).
-
-OUTPUT — return ONLY valid JSON in exactly this schema:
+OUTPUT FORMAT — JSON only:
 {
-  "next_question": "single question, ≤ 28 words, OR empty string if ready",
+  "next_question": "your conversational reply (acknowledgement + next nudge), OR empty string if ready",
   "ready_for_shortlist": false,
   "captured": {
     "audience": "",
@@ -142,18 +139,31 @@ async def next_critique_turn(
     ready = bool(parsed.get("ready_for_shortlist", False))
     next_q = (parsed.get("next_question") or "").strip()
 
-    # Dup-guard: if the model returned a question that is identical or near-
-    # identical to one already asked, force a different unmet topic instead.
+    # Dup-guard v2: refuse any next-question whose topic is already covered
+    # (captured non-empty OR previously asked). Catches paraphrases that the
+    # plain text dup-check would miss. If a replacement is needed and every
+    # topic is captured, we declare ready.
     asked_qs = [(t.get("q") or "").strip() for t in turns]
-    if next_q and _is_duplicate_question(next_q, asked_qs):
-        replacement = _next_unmet_question(merged, asked_qs)
-        if replacement:
-            logger.info("critique: replaced duplicate question with unmet-topic fallback")
-            next_q = replacement
-        else:
-            # Every topic captured AND model duplicated — declare ready.
-            ready = True
-            next_q = ""
+    if next_q:
+        next_q_topic = _infer_topic_for_question(next_q)
+        text_dup = _is_duplicate_question(next_q, asked_qs)
+        covered_topics = (
+            {k for k, v in (merged or {}).items() if isinstance(v, str) and v.strip()}
+            | {_infer_topic_for_question(q) for q in asked_qs if _infer_topic_for_question(q)}
+        )
+        topic_already_covered = next_q_topic is not None and next_q_topic in covered_topics
+        if text_dup or topic_already_covered:
+            replacement = _next_unmet_question(merged, asked_qs)
+            if replacement:
+                logger.info(
+                    "critique: replaced %s question (topic=%s)",
+                    "duplicate" if text_dup else "already-covered",
+                    next_q_topic,
+                )
+                next_q = replacement
+            else:
+                ready = True
+                next_q = ""
 
     # Force ready when the model returns no follow-up and the required topics are present.
     if not next_q and all(merged.get(t) for t in _REQUIRED_TOPICS):
@@ -284,21 +294,36 @@ def _build_user_prompt(
         parts.append(f"DATES: {date_start or '?'} → {date_end or '?'}")
     if scope_summary:
         parts.append(f"SCOPE: {scope_summary}")
-    parts.append(f"QUESTIONS ASKED SO FAR: {questions_so_far} (cap: {_MAX_TURNS})")
+    parts.append(f"TURNS SO FAR: {questions_so_far} (soft cap: {_MAX_TURNS})")
+
+    # Explicit "what's already covered" line — most important guard against
+    # re-asking the same topic. Derived from captured AND inferred-from-questions
+    # so the model can't accidentally re-ask audience just because Gemini
+    # itself returned an empty audience field on the prior turn.
+    asked_topics = set()
+    for t in turns or []:
+        topic = _infer_topic_for_question((t.get("q") or "").strip())
+        if topic:
+            asked_topics.add(topic)
+    captured_topics = {k for k, v in (captured or {}).items() if isinstance(v, str) and v.strip()}
+    covered = sorted(asked_topics | captured_topics)
+    remaining = [t for t in _REQUIRED_TOPICS if t not in covered]
+    parts.append(f"TOPICS ALREADY COVERED (do NOT ask about these again): {covered or 'none yet'}")
+    parts.append(f"TOPICS STILL OPEN (pick your next nudge from here, or close out): {remaining or 'none — you should be ready'}")
     parts.append(f"CAPTURED SO FAR:\n{json.dumps(captured, indent=2)}")
 
     if turns:
-        parts.append("CONVERSATION HISTORY:")
+        parts.append("\nCONVERSATION HISTORY (last message is the user's reply you need to respond to):")
         for i, t in enumerate(turns, 1):
-            parts.append(f"Q{i}: {t.get('q', '')}")
-            parts.append(f"A{i}: {t.get('a', '')}")
+            parts.append(f"YOU said: {t.get('q', '')}")
+            parts.append(f"USER said: {t.get('a', '')}")
     else:
-        parts.append("CONVERSATION HISTORY: (none yet — produce the FIRST critique question)")
+        parts.append("\nCONVERSATION HISTORY: (none yet — open the chat with a warm one-liner that picks up on the theme and asks about ONE of the open topics)")
 
     parts.append(
-        "\nRespond with the next single question that most sharpens the brief, "
-        "or set ready_for_shortlist=true if all required topics are captured. "
-        "Return JSON only."
+        "\nReply now. JSON only. Remember: covered topics are off-limits for new questions; "
+        "if all five required slots have any non-empty captured value, set ready_for_shortlist=true "
+        "and put a one-line closer in next_question (or leave it empty)."
     )
     return "\n".join(parts)
 

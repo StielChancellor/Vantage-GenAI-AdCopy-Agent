@@ -8,10 +8,10 @@
  * Honors the shared SelectionContext; the picker is the canonical
  * IntelligentPropertyPicker. Never accepts free-text property names.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Sparkles, ChevronLeft, ChevronRight, Loader2, MessageCircle, CheckCircle2 } from 'lucide-react';
+import { Sparkles, ChevronLeft, ChevronRight, Loader2, CheckCircle2, Circle, Send } from 'lucide-react';
 import IntelligentPropertyPicker from '../components/IntelligentPropertyPicker';
 import { useSelection } from '../contexts/SelectionContext';
 import { useAuth } from '../hooks/useAuth';
@@ -24,10 +24,51 @@ import {
 
 const STEPS = [
   { id: 1, label: 'Setup' },
-  { id: 2, label: 'Critique' },
+  { id: 2, label: 'Chat' },
   { id: 3, label: 'Shortlist' },
   { id: 4, label: 'Done' },
 ];
+
+// Slots tracked by the coach. Order = order shown on the right rail.
+const BRIEF_SLOTS = [
+  { key: 'audience',     label: 'Audience' },
+  { key: 'hero_offer',   label: 'Hero offer' },
+  { key: 'tone',         label: 'Tone' },
+  { key: 'must_mention', label: 'Must mention' },
+  { key: 'must_avoid',   label: 'Must avoid' },
+];
+
+function ChatMessages({ history, pendingQuestion, readyForShortlist, loading }) {
+  const scrollRef = useRef(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [history, pendingQuestion, loading]);
+
+  return (
+    <div className="chat-messages" ref={scrollRef}>
+      {history.map((t, i) => (
+        <div key={i} className="chat-pair">
+          <div className="chat-msg coach">{t.q}</div>
+          {t.a && <div className="chat-msg user">{t.a}</div>}
+        </div>
+      ))}
+      {!readyForShortlist && pendingQuestion && (
+        <div className="chat-msg coach">{pendingQuestion}</div>
+      )}
+      {readyForShortlist && (
+        <div className="chat-msg coach chat-msg-closer">
+          The brief looks tight. When you're ready, I'll pull together ten directions on the right →
+        </div>
+      )}
+      {loading && (
+        <div className="chat-msg coach chat-typing">
+          <span /><span /><span />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function selectionFromPicker(p) {
   if (!p) return null;
@@ -256,62 +297,92 @@ export default function CampaignIdeation() {
 
       {step === 2 && (
         <section className="wizard-panel">
-          <h2>Critique</h2>
-          <p style={{ color: 'var(--em-ink-soft)', marginTop: -4 }}>
-            Sharpening the brief — {describeSelection(pickerSel)}.
-          </p>
+          <div className="chat-shell">
+            <div className="chat-thread">
+              <header className="chat-thread-head">
+                <h2 style={{ margin: 0 }}>Campaign coach</h2>
+                <span style={{ color: 'var(--em-ink-soft)', fontSize: 13 }}>
+                  {describeSelection(pickerSel)}
+                </span>
+              </header>
 
-          {history.length > 0 && (
-            <div className="critique-history">
-              {history.map((t, i) => (
-                <div key={i} className="critique-turn">
-                  <div className="critique-q"><MessageCircle size={14} /> {t.q}</div>
-                  <div className="critique-a">{t.a}</div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!readyForShortlist && pendingQuestion && (
-            <div className="critique-current">
-              <div className="critique-q"><MessageCircle size={14} /> {pendingQuestion}</div>
-              <textarea
-                rows={3}
-                placeholder="Your answer…"
-                value={answerText}
-                onChange={(e) => setAnswerText(e.target.value)}
+              <ChatMessages
+                history={history}
+                pendingQuestion={pendingQuestion}
+                readyForShortlist={readyForShortlist}
+                loading={loading}
               />
-            </div>
-          )}
 
-          {readyForShortlist && (
-            <div className="em-card" style={{ padding: 16, marginTop: 8 }}>
-              <strong>Brief looks tight.</strong>
-              <p style={{ marginTop: 4, color: 'var(--em-ink-soft)' }}>
-                Captured: {Object.entries(captured || {})
-                  .filter(([, v]) => v && typeof v === 'string')
-                  .map(([k]) => k.replace(/_/g, ' '))
-                  .join(', ') || '—'}
-              </p>
+              <div className="chat-composer">
+                <textarea
+                  rows={2}
+                  placeholder={readyForShortlist
+                    ? 'Add anything else before we generate concepts…'
+                    : 'Reply to the coach…'}
+                  value={answerText}
+                  onChange={(e) => setAnswerText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (answerText.trim() && !loading) onAnswer();
+                    }
+                  }}
+                  disabled={loading}
+                />
+                <button
+                  className="btn btn-primary"
+                  onClick={onAnswer}
+                  disabled={!answerText.trim() || loading}
+                  title="Send (Enter)"
+                >
+                  {loading ? <Loader2 size={16} className="spin" /> : <Send size={16} />}
+                </button>
+              </div>
             </div>
-          )}
 
-          <div className="wizard-nav">
-            <button className="btn btn-outline" onClick={() => setStep(1)}>
-              <ChevronLeft size={16} /> Back
-            </button>
-            <div className="wizard-nav-spacer" />
-            {!readyForShortlist ? (
-              <button className="btn btn-primary" onClick={onAnswer} disabled={!answerText.trim() || loading}>
-                {loading ? <Loader2 size={16} className="spin" /> : <ChevronRight size={16} />}
-                Next
-              </button>
-            ) : (
-              <button className="btn btn-primary" onClick={onGenerateShortlist} disabled={loading}>
-                {loading ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
-                Generate 10 concepts
-              </button>
-            )}
+            <aside className="chat-rail">
+              <div className="em-mono-label">Brief</div>
+              <ul className="brief-checklist">
+                {BRIEF_SLOTS.map((s) => {
+                  const v = (captured?.[s.key] || '').trim();
+                  const filled = v.length > 0;
+                  return (
+                    <li key={s.key} className={`brief-item ${filled ? 'filled' : ''}`}>
+                      <span className="brief-item-icon">
+                        {filled ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                      </span>
+                      <div className="brief-item-body">
+                        <div className="brief-item-label">{s.label}</div>
+                        {filled && (
+                          <div className="brief-item-value" title={v}>{v}</div>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {readyForShortlist && (
+                <div className="brief-ready">
+                  <CheckCircle2 size={16} /> Brief is ready
+                </div>
+              )}
+
+              <div className="chat-rail-actions">
+                <button className="btn btn-outline btn-sm" onClick={() => setStep(1)}>
+                  <ChevronLeft size={14} /> Back
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={onGenerateShortlist}
+                  disabled={!readyForShortlist || loading}
+                  title={readyForShortlist ? 'Generate 10 concepts' : 'Keep chatting until the brief is ready'}
+                >
+                  {loading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+                  Generate 10 concepts
+                </button>
+              </div>
+            </aside>
           </div>
         </section>
       )}
