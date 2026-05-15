@@ -195,7 +195,7 @@ def get_generative_model(
 @lru_cache(maxsize=1)
 def _resolve_model() -> str:
     """Resolve the default model from Firestore admin settings, fall back to env."""
-    default = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview")
+    default = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
     try:
         # Lazy import to avoid circular dependency
         from backend.app.core.database import get_firestore

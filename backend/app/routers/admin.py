@@ -20,17 +20,15 @@ from backend.app.services.csv_ingestion import ingest_historical_csv, ingest_bra
 from backend.app.services.hotels import catalog as hotel_catalog
 
 AVAILABLE_MODELS = [
-    {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro (Preview)"},
-    {"id": "claude-opus-4-7", "label": "Claude Opus 4.7 (Anthropic, via Vertex)"},
+    {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash (Recommended)"},
     {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
-    {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+    {"id": "claude-opus-4-7", "label": "Claude Opus 4.7 (Anthropic, via Vertex)"},
     {"id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite"},
     {"id": "gemini-2.0-flash-lite", "label": "Gemini 2.0 Flash Lite"},
 ]
 
 # Cost calculation: USD per 1M tokens
 MODEL_PRICING = {
-    "gemini-3.1-pro-preview": {"input": 3.50, "output": 14.00},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
     "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
     "gemini-2.5-flash-lite": {"input": 0.075, "output": 0.30},

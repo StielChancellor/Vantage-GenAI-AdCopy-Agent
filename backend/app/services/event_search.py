@@ -87,7 +87,7 @@ Use your web search results to provide accurate dates and current information. R
         # regardless of the admin-selected default (Claude adapter doesn't
         # support Vertex tools).
         model = get_generative_model(
-            "gemini-3.1-pro-preview",
+            "gemini-2.5-flash",
             system_instruction="You are a travel industry event expert. Use Google Search to find real upcoming events. Return ONLY valid JSON array, no markdown.",
             tools=[search_tool],
         )

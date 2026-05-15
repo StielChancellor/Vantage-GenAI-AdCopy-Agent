@@ -35,7 +35,7 @@ steps:
       - '--timeout=300'
       - '--service-account=vantage-cloudrun-sa@$PROJECT_ID.iam.gserviceaccount.com'
       - '--no-cpu-throttling'
-      - '--update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,VERTEX_AI_LOCATION=us-central1,GEMINI_MODEL=gemini-3.1-pro-preview,BQ_DATASET=vantage,CLOUD_TASKS_QUEUE=vantage-ingestion,CLOUD_TASKS_LOCATION=us-central1,GCS_UPLOADS_BUCKET=vantage-uploads-$PROJECT_ID,GCS_FAILED_BUCKET=vantage-failed-ingestion-$PROJECT_ID,ENVIRONMENT=production'
+      - '--update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=us-central1,VERTEX_AI_LOCATION=us-central1,GEMINI_MODEL=gemini-2.5-flash,BQ_DATASET=vantage,CLOUD_TASKS_QUEUE=vantage-ingestion,CLOUD_TASKS_LOCATION=us-central1,GCS_UPLOADS_BUCKET=vantage-uploads-$PROJECT_ID,GCS_FAILED_BUCKET=vantage-failed-ingestion-$PROJECT_ID,ENVIRONMENT=production'
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/vantage/backend:$COMMIT_SHA'

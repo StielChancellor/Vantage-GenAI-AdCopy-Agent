@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # Vertex AI — non-sensitive
     VERTEX_AI_LOCATION: str = "us-central1"
-    GEMINI_MODEL: str = "gemini-3.1-pro-preview"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # BigQuery
     BQ_DATASET: str = "vantage"

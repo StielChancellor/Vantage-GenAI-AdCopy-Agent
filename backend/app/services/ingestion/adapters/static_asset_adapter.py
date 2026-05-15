@@ -186,7 +186,7 @@ _CAPTION_SCHEMA_HINT = {
 }
 
 
-_CAPTION_MODEL = "gemini-3.1-pro-preview"
+_CAPTION_MODEL = "gemini-2.5-flash"
 
 
 async def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[dict, int, int]:
@@ -203,6 +203,8 @@ async def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> tu
 
         # Captioning is multimodal — pin to a Gemini vision model regardless of
         # the admin-selected default (Claude adapter is text-only on this path).
+        # Captioning is multimodal — pin to a Gemini vision model. _CAPTION_MODEL
+        # is a real Vertex publisher id (2.5-flash supports vision).
         model = get_generative_model(
             model_name=_CAPTION_MODEL,
             system_instruction=_CAPTION_SYSTEM,
