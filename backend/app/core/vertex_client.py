@@ -34,7 +34,12 @@ def _ensure_init() -> None:
         if _initialized:
             return
         project = os.environ.get("GCP_PROJECT_ID", "supple-moon-495404-b0")
-        location = os.environ.get("VERTEX_AI_LOCATION", "us-central1")
+        # Default to the `global` endpoint because newer Gemini preview models
+        # (gemini-3.1-pro-preview) are only published there. The regional
+        # us-central1 endpoint is missing those models even though grounding
+        # tools still target it — those callsites pass tools=... and bypass
+        # the fallback wrapper, so they still resolve correctly.
+        location = os.environ.get("VERTEX_AI_LOCATION", "global")
         vertexai.init(project=project, location=location)
         _initialized = True
 
@@ -163,6 +168,65 @@ class _ClaudeModelAdapter:
         return _AnthropicResponse(raw)
 
 
+_GEMINI_FALLBACK = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+_UNAVAILABLE_MODELS: set[str] = set()
+_unavailable_lock = threading.Lock()
+
+
+class _GeminiFallbackModel:
+    """Wrapper around `GenerativeModel` that transparently falls back to a
+    known-good Gemini id if the primary model 404s (typical when an admin
+    selects a preview model that isn't enabled in this project's region).
+    The fallback decision is cached process-wide so subsequent requests
+    skip the primary attempt entirely until restart.
+    """
+
+    def __init__(
+        self,
+        primary_name: str,
+        fallback_name: str,
+        system_instruction: str | None,
+        **kwargs,
+    ):
+        self._primary_name = primary_name
+        self._fallback_name = fallback_name
+        self._system = system_instruction
+        self._kwargs = dict(kwargs)
+        self._model_name = primary_name   # surface as if it were primary
+        self._using_fallback = primary_name in _UNAVAILABLE_MODELS
+        if self._using_fallback:
+            self._model = self._build(fallback_name)
+        else:
+            self._model = self._build(primary_name)
+
+    def _build(self, name: str):
+        init_kwargs = dict(self._kwargs)
+        if self._system:
+            init_kwargs["system_instruction"] = self._system
+        return GenerativeModel(name, **init_kwargs)
+
+    def generate_content(self, prompt):
+        try:
+            return self._model.generate_content(prompt)
+        except Exception as exc:
+            msg = str(exc)
+            # Catch 404 / model-not-found / no-access on the primary; never
+            # fall back if the wrapper is already on the fallback model.
+            is_missing = ("404" in msg or "was not found" in msg or "do not have access" in msg.lower())
+            if self._using_fallback or not is_missing:
+                raise
+            logger.warning(
+                "Primary Gemini model %s unavailable (404). Falling back to %s. "
+                "Enable %s in Vertex AI Model Garden to use it.",
+                self._primary_name, self._fallback_name, self._primary_name,
+            )
+            with _unavailable_lock:
+                _UNAVAILABLE_MODELS.add(self._primary_name)
+            self._using_fallback = True
+            self._model = self._build(self._fallback_name)
+            return self._model.generate_content(prompt)
+
+
 def get_generative_model(
     model_name: str | None = None,
     system_instruction: str | None = None,
@@ -170,10 +234,10 @@ def get_generative_model(
 ):
     """Return a configured generation client.
 
-    For Gemini ids → returns a `vertexai.generative_models.GenerativeModel`.
-    For Claude ids (anything starting with `claude-`) → returns a
-    `_ClaudeModelAdapter` that exposes the same `.generate_content` and
-    response shape (text-only).
+    For Gemini ids → returns a `_GeminiFallbackModel` (auto-falls back to
+    `gemini-2.5-flash` when the primary isn't enabled in this project).
+    For Claude ids (anything starting with `claude-`) → returns the
+    `_ClaudeModelAdapter` (text-only).
     """
     _ensure_init()
 
@@ -185,17 +249,27 @@ def get_generative_model(
             logger.debug("Claude adapter ignores extra kwargs: %s", list(kwargs))
         return _ClaudeModelAdapter(model_name, system_instruction=system_instruction)
 
-    init_kwargs = dict(kwargs)
-    if system_instruction:
-        init_kwargs["system_instruction"] = system_instruction
+    # Skip the fallback wrapper when the primary IS the fallback (no point
+    # double-wrapping) or when special features like tools are present
+    # (the fallback model may not support every tool surface).
+    if model_name == _GEMINI_FALLBACK or "tools" in kwargs:
+        init_kwargs = dict(kwargs)
+        if system_instruction:
+            init_kwargs["system_instruction"] = system_instruction
+        return GenerativeModel(model_name, **init_kwargs)
 
-    return GenerativeModel(model_name, **init_kwargs)
+    return _GeminiFallbackModel(
+        primary_name=model_name,
+        fallback_name=_GEMINI_FALLBACK,
+        system_instruction=system_instruction,
+        **kwargs,
+    )
 
 
 @lru_cache(maxsize=1)
 def _resolve_model() -> str:
     """Resolve the default model from Firestore admin settings, fall back to env."""
-    default = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    default = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview")
     try:
         # Lazy import to avoid circular dependency
         from backend.app.core.database import get_firestore
@@ -230,6 +304,12 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
 }
+
+
+def is_using_fallback(model_name: str) -> bool:
+    """True if the given primary model has been observed as unavailable
+    and is silently routed to the fallback. Useful for admin diagnostics."""
+    return model_name in _UNAVAILABLE_MODELS
 
 USD_TO_INR = 85
 

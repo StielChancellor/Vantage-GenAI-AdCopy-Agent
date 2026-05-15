@@ -186,7 +186,7 @@ _CAPTION_SCHEMA_HINT = {
 }
 
 
-_CAPTION_MODEL = "gemini-2.5-flash"
+_CAPTION_MODEL = "gemini-3.1-pro-preview"
 
 
 async def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> tuple[dict, int, int]:
