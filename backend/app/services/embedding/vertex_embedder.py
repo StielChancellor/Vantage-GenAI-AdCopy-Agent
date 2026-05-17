@@ -21,12 +21,32 @@ _embed_model = None
 
 
 def _get_embed_model():
+    """Build the TextEmbeddingModel pinned to a region. Vertex does NOT publish
+    text-embedding-005 on the `global` endpoint (only Gemini generative
+    models are there), so we re-init the Vertex SDK to `us-central1` long
+    enough to construct the model, then restore the global default.
+
+    The TextEmbeddingModel instance captures its endpoint at construction
+    time, so subsequent Gemini calls continue to hit the global endpoint
+    while embeddings stay regional."""
     global _embed_model
     if _embed_model is None:
+        import os
+        import vertexai
         from vertexai.language_models import TextEmbeddingModel
         from backend.app.core.vertex_client import _ensure_init
-        _ensure_init()
-        _embed_model = TextEmbeddingModel.from_pretrained(_EMBEDDING_MODEL)
+
+        _ensure_init()  # initial process-wide init (location=global by default)
+        project = os.environ.get("GCP_PROJECT_ID", "supple-moon-495404-b0")
+        embed_region = os.environ.get("VERTEX_EMBED_LOCATION", "us-central1")
+        global_region = os.environ.get("VERTEX_AI_LOCATION", "global")
+
+        try:
+            vertexai.init(project=project, location=embed_region)
+            _embed_model = TextEmbeddingModel.from_pretrained(_EMBEDDING_MODEL)
+        finally:
+            # Restore the global default so Gemini callers keep hitting it.
+            vertexai.init(project=project, location=global_region)
     return _embed_model
 
 
