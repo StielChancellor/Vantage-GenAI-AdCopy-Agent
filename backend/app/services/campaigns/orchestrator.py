@@ -292,8 +292,16 @@ async def run_campaign(campaign: dict, override_selection: UnifiedCampaignSelect
         for channel in selection.channels:
             tasks.append((len(tasks), entity, level, channel))
 
-    async def _run_one(idx: int, entity: dict, level: str, channel: str) -> dict:
-        async with sem:
+    # v2.9.4 — the leaf generators (ad_generator, crm_generator) are
+    # async-declared but block the event loop on the synchronous Vertex
+    # SDK's model.generate_content(). asyncio.gather alone can't run them
+    # in parallel because the event loop is single-threaded. Dispatch each
+    # task through asyncio.to_thread so each runs in its own worker thread
+    # with its own event loop — true HTTP parallelism while the GIL is
+    # released during socket I/O.
+    def _do_one_sync(idx: int, entity: dict, level: str, channel: str) -> dict:
+        # Each thread spins up a fresh event loop to drive the async leaf.
+        async def _do():
             entity_label = _resolve_label(entity)
             row = CampaignResultRow(
                 label=entity_label, scope=entity.get("scope", "hotel"),
@@ -320,6 +328,11 @@ async def run_campaign(campaign: dict, override_selection: UnifiedCampaignSelect
                 )
                 row.error = str(exc)[:300]
             return row.model_dump()
+        return asyncio.new_event_loop().run_until_complete(_do())
+
+    async def _run_one(idx: int, entity: dict, level: str, channel: str) -> dict:
+        async with sem:
+            return await asyncio.to_thread(_do_one_sync, idx, entity, level, channel)
 
     coros = [_run_one(i, e, l, c) for (i, e, l, c) in tasks]
     raw_rows = await asyncio.gather(*coros, return_exceptions=False)
