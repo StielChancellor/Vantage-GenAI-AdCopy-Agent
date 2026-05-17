@@ -136,11 +136,21 @@ async def generate_final_concepts(
         }
         if is_loyalty:
             cleaned_vc = _anonymize_visual_cue(cleaned_vc, _anonymize_passage)
+        story_line = _clip(c.get("story_line"), 600)
+        if not story_line:
+            # Model occasionally omits story_line even though the prompt
+            # marks it REQUIRED. Synthesise a serviceable fallback from
+            # the other fields so exports are never blank.
+            story_line = _synthesise_story_line(
+                name=name,
+                justification=c.get("justification") or "",
+                visual_cue=cleaned_vc,
+            )
         cleaned.append({
             "id": _clean_id(c.get("id"), prefix=f"f{len(cleaned)+1}"),
             "name": name[:80],
             "justification": _clip(c.get("justification"), 220),
-            "story_line": _clip(c.get("story_line"), 600),
+            "story_line": story_line,
             "visual_cue": cleaned_vc,
             "inspiration_asset_ids": [str(x)[:64] for x in (c.get("inspiration_asset_ids") or [])][:5],
         })
@@ -303,6 +313,38 @@ def _clip(v, n: int) -> str:
     if v is None:
         return ""
     return str(v).strip()[:n]
+
+
+def _synthesise_story_line(name: str, justification: str, visual_cue: dict) -> str:
+    """Compose a 2-3 sentence narrative from the other concept fields.
+    Used only when the model omits story_line despite the prompt's REQUIRED
+    rule."""
+    vc = visual_cue or {}
+    mood = vc.get("mood") or ""
+    motifs = vc.get("motifs") or []
+    photo = vc.get("photography_style") or ""
+    palette = vc.get("palette") or []
+
+    motif_phrase = ""
+    if motifs:
+        first = motifs[:2]
+        motif_phrase = " The campaign holds " + " and ".join(first) + " at its centre."
+
+    sense_phrase = ""
+    if mood:
+        sense_phrase = f" The mood reads {mood.rstrip('.,')}."
+    elif photo:
+        sense_phrase = f" {photo[:120]}"
+
+    palette_phrase = ""
+    if palette:
+        first_palette = ", ".join([str(p) for p in palette[:3]])
+        palette_phrase = f" A palette of {first_palette} carries the visual register."
+
+    headline = (justification or "").rstrip(".") or name
+    base = f"{name} positions {headline.lower()}." if name and justification else f"{name}."
+    out = (base + motif_phrase + sense_phrase + palette_phrase).strip()
+    return out[:600] or name[:600]
 
 
 def _filler_concepts(seed: str) -> list[dict]:
