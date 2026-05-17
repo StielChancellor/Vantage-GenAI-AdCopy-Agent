@@ -2,14 +2,25 @@
 
 Uses text-embedding-005 (768-dimensional). Caches embeddings in Firestore
 by content hash to avoid re-embedding identical text across training runs.
+
+v2.8.1+ — calls the Vertex AI REST API directly against the regional
+endpoint (default us-central1). The high-level `TextEmbeddingModel`
+SDK class respects the process-wide `vertexai.init(location=...)`
+default, which the rest of this codebase pins to `global` so
+gemini-3.1-pro-preview resolves. Text-embedding models are NOT
+published on the global endpoint, so we use the REST API with an
+explicit regional URL.
 """
 from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import threading
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger("vantage.embedding")
@@ -17,37 +28,67 @@ logger = logging.getLogger("vantage.embedding")
 _EMBEDDING_MODEL = "text-embedding-005"
 _EMBEDDING_DIM = 768
 
-_embed_model = None
+_creds = None
+_creds_lock = threading.Lock()
 
 
-def _get_embed_model():
-    """Build the TextEmbeddingModel pinned to a region. Vertex does NOT publish
-    text-embedding-005 on the `global` endpoint (only Gemini generative
-    models are there), so we re-init the Vertex SDK to `us-central1` long
-    enough to construct the model, then restore the global default.
+def _get_creds():
+    """Lazy-init ADC creds — re-uses the same service-account identity that
+    the rest of the platform uses."""
+    global _creds
+    if _creds is not None:
+        return _creds
+    with _creds_lock:
+        if _creds is not None:
+            return _creds
+        import google.auth
+        c, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        _creds = c
+    return _creds
 
-    The TextEmbeddingModel instance captures its endpoint at construction
-    time, so subsequent Gemini calls continue to hit the global endpoint
-    while embeddings stay regional."""
-    global _embed_model
-    if _embed_model is None:
-        import os
-        import vertexai
-        from vertexai.language_models import TextEmbeddingModel
-        from backend.app.core.vertex_client import _ensure_init
 
-        _ensure_init()  # initial process-wide init (location=global by default)
-        project = os.environ.get("GCP_PROJECT_ID", "supple-moon-495404-b0")
-        embed_region = os.environ.get("VERTEX_EMBED_LOCATION", "us-central1")
-        global_region = os.environ.get("VERTEX_AI_LOCATION", "global")
+def _embed_url() -> str:
+    project = os.environ.get("GCP_PROJECT_ID", "supple-moon-495404-b0")
+    region = os.environ.get("VERTEX_EMBED_LOCATION", "us-central1")
+    return (
+        f"https://{region}-aiplatform.googleapis.com/v1/projects/{project}"
+        f"/locations/{region}/publishers/google/models/{_EMBEDDING_MODEL}:predict"
+    )
 
-        try:
-            vertexai.init(project=project, location=embed_region)
-            _embed_model = TextEmbeddingModel.from_pretrained(_EMBEDDING_MODEL)
-        finally:
-            # Restore the global default so Gemini callers keep hitting it.
-            vertexai.init(project=project, location=global_region)
-    return _embed_model
+
+def _fresh_token() -> str:
+    """Refresh ADC creds on demand."""
+    creds = _get_creds()
+    if not creds.valid:
+        from google.auth.transport.requests import Request
+        creds.refresh(Request())
+    return creds.token
+
+
+def _predict_embeddings(texts: list[str]) -> list[list[float]]:
+    """Single-batch REST call to the regional Vertex embeddings endpoint.
+    Returns one 768-dim list per input. Raises on HTTP error."""
+    if not texts:
+        return []
+    body = {"instances": [{"content": t} for t in texts]}
+    headers = {
+        "Authorization": f"Bearer {_fresh_token()}",
+        "Content-Type": "application/json",
+    }
+    with httpx.Client(timeout=60.0) as client:
+        resp = client.post(_embed_url(), json=body, headers=headers)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Vertex embed REST error {resp.status_code}: {resp.text[:300]}"
+            )
+        data = resp.json()
+    out: list[list[float]] = []
+    for p in data.get("predictions", []):
+        emb = (p.get("embeddings") or {}).get("values")
+        if not isinstance(emb, list):
+            raise RuntimeError(f"Unexpected embed response: {str(p)[:300]}")
+        out.append(emb)
+    return out
 
 
 @dataclass
@@ -100,18 +141,16 @@ async def embed_texts(
         to_embed_indices = list(range(len(texts)))
         to_embed_texts = texts
 
-    # Embed uncached texts
+    # Embed uncached texts via the regional REST endpoint.
     if to_embed_texts:
-        model = _get_embed_model()
-        embeddings = model.get_embeddings(to_embed_texts)
+        embedding_values_list = _predict_embeddings(to_embed_texts)
 
         if use_cache:
             db = _get_firestore()
 
-        for pos, (orig_idx, emb_result) in enumerate(zip(to_embed_indices, embeddings)):
+        for pos, (orig_idx, embedding_values) in enumerate(zip(to_embed_indices, embedding_values_list)):
             text = texts[orig_idx]
             content_hash = _hash_text(text)
-            embedding_values = emb_result.values
 
             if use_cache:
                 _cache_embedding(db, content_hash, embedding_values)
