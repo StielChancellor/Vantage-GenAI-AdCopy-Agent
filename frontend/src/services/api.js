@@ -135,18 +135,28 @@ export const getCampaign = (id) => api.get(`/campaigns/${encodeURIComponent(id)}
 export const patchCampaign = (id, data) => api.patch(`/campaigns/${encodeURIComponent(id)}`, data);
 export const generateCampaign = (id, data) => api.post(`/campaigns/${encodeURIComponent(id)}/generate`, data, { timeout: 600000 });
 
-// Campaign Ideation (v2.7)
-export const startIdeation = (data) => api.post('/ideation/start', data);
-export const answerIdeation = (id, answerText) =>
-  api.post(`/ideation/${encodeURIComponent(id)}/answer`, { answer_text: answerText });
-export const generateShortlist = (id) =>
-  api.post(`/ideation/${encodeURIComponent(id)}/shortlist`, {}, { timeout: 600000 });
+// Campaign Ideation v2.8 — Form → Directions → Final 10 → Handoff
+export const startIdeation = (inputs) => api.post('/ideation/start', { inputs });
+export const resolveHotels = (phrase) =>
+  api.post('/ideation/resolve-hotels', { phrase }, { timeout: 90000 });
+export const generateDirections = (id) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/directions`, {}, { timeout: 600000 });
+export const refineIdeation = (id, body) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/refine`, body, { timeout: 600000 });
+export const finalizeIdeation = (id, body = {}) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/finalize`, body, { timeout: 600000 });
 export const chooseShortlist = (id, index) =>
   api.post(`/ideation/${encodeURIComponent(id)}/choose`, { index });
 export const getIdeation = (id) => api.get(`/ideation/${encodeURIComponent(id)}`);
 export const listIdeations = (limit = 30) => api.get(`/ideation?limit=${limit}`);
 export const archiveIdeation = (id) =>
   api.post(`/ideation/${encodeURIComponent(id)}/archive`);
+
+// Legacy v2.7 client (still used to resume in-progress chat-coach ideations).
+export const answerIdeation = (id, answerText) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/answer`, { answer_text: answerText });
+export const generateShortlist = (id) =>
+  api.post(`/ideation/${encodeURIComponent(id)}/shortlist`, {}, { timeout: 600000 });
 
 // Creative assets (admin training corpus for ideation)
 export const uploadCreativePack = (file, brandId, runId = '', packId = '') => {

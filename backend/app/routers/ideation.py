@@ -1,12 +1,11 @@
-"""Campaign Ideation endpoints (v2.7).
+"""Campaign Ideation endpoints.
 
-Upstream tool that produces a 10-concept shortlist from a free-text theme
-and a critique chat, grounded in past static-creative assets. Selecting a
-shortlist item creates a draft `unified_campaigns` doc so the user
-continues into lock → fan-out via the existing Unified Campaign flow.
+v2.8 — Form -> Directions -> Final 10 -> Unified Campaign handoff.
+v2.7 — chat coach (still served for in-progress ideations on phase ∈ {critique, shortlist}).
 
 Lifecycle on `campaign_ideations/{id}`:
-  critique → shortlist → chosen | archived
+  v2.8: inputs → directions → refining → final → chosen | archived
+  v2.7: critique → shortlist → chosen | archived
 """
 from __future__ import annotations
 
@@ -23,14 +22,25 @@ from backend.app.core.auth import (
 from backend.app.core.database import get_firestore
 from backend.app.core.version import APP_VERSION
 from backend.app.models.schemas import (
+    # v2.7 (legacy)
     IdeationStartRequest, IdeationStartResponse,
     IdeationAnswerRequest, IdeationAnswerResponse,
     IdeationShortlistResponse, ShortlistItem,
     IdeationChooseRequest, IdeationChooseResponse,
     IdeationState, CritiqueTurn, PropertySelection,
+    # v2.8
+    IdeationInputs, IdeationStartV2Request, IdeationStartV2Response,
+    ResolveHotelsRequest, ResolveHotelsResponse, ResolvedHotelRef,
+    IdeationDirectionsResponse, IdeationDirection, IdeationDirectionConcept,
+    IdeationVisualCue, IdeationRefineRequest,
+    IdeationFinalConcept, IdeationFinalizeRequest, IdeationFinalResponse,
+    IdeationStateV2, IdeationIterationRecord,
 )
 from backend.app.services.ideation.critique_engine import next_critique_turn
 from backend.app.services.ideation.shortlist_generator import generate_shortlist
+from backend.app.services.ideation.hotels_resolver import resolve_hotels as _resolve_hotels
+from backend.app.services.ideation.direction_generator import generate_directions as _generate_directions
+from backend.app.services.ideation.finalizer import generate_final_concepts as _generate_final_concepts
 from backend.app.services.rag_engine import retrieve_visual_inspiration
 
 logger = logging.getLogger("vantage.ideation")
@@ -147,12 +157,405 @@ def _require_owner_or_admin(doc_data: dict, current_user: dict) -> None:
 # ──────────────────────────────────────────────────────────────────
 
 
-@router.post("/start", response_model=IdeationStartResponse)
+# ──────────────────────────────────────────────────────────────────
+# v2.8 helpers — derive selection from the structured Inputs
+# ──────────────────────────────────────────────────────────────────
+
+
+def _selection_from_inputs(inputs: IdeationInputs) -> PropertySelection:
+    """Synthesise a PropertySelection (the platform's shared shape) from the
+    Step-1 inputs' hotels_resolution. This is what gets persisted, what the
+    access-gate enforces against, and what fan-out reads at Unified Campaign
+    handoff."""
+    hr = inputs.hotels_resolution
+    hotel_ids = list(hr.resolved_hotel_ids or [])
+    brand_ids = list(hr.resolved_brand_ids or [])
+    is_loyalty = bool(hr.is_loyalty)
+
+    if is_loyalty and brand_ids:
+        return PropertySelection(
+            scope="loyalty",
+            brand_id=brand_ids[0],
+            brand_ids=brand_ids,
+            hotel_ids=hotel_ids,
+            is_loyalty=True,
+        )
+    if len(hotel_ids) == 1 and not brand_ids:
+        return PropertySelection(scope="hotel", hotel_id=hotel_ids[0], hotel_ids=hotel_ids)
+    if not hotel_ids and len(brand_ids) == 1:
+        return PropertySelection(scope="brand", brand_id=brand_ids[0], brand_ids=brand_ids)
+    return PropertySelection(
+        scope="multi",
+        hotel_ids=hotel_ids,
+        brand_ids=brand_ids,
+        is_loyalty=is_loyalty,
+    )
+
+
+def _hotel_context_from_inputs(inputs: dict) -> list[dict]:
+    """Pull a slim brand/city context list for naming inspiration, derived from
+    the resolved hotel ids on the inputs."""
+    hr = (inputs or {}).get("hotels_resolution") or {}
+    hotel_ids = hr.get("resolved_hotel_ids") or []
+    if not hotel_ids:
+        return []
+    try:
+        from backend.app.services.hotels import catalog as hc
+        all_h = {h["hotel_id"]: h for h in hc.list_hotels()}
+    except Exception:
+        return []
+    out: list[dict] = []
+    for hid in hotel_ids[:30]:
+        h = all_h.get(hid) or {}
+        out.append({
+            "hotel_id": hid,
+            "name": h.get("hotel_name", ""),
+            "brand": h.get("brand_name", ""),
+            "city": h.get("city", ""),
+        })
+    return out
+
+
+def _slim_iteration_record(it: dict) -> dict:
+    """Keep only what the generators need: titles + names. Strip Firestore
+    timestamp objects so JSON serialisation is safe."""
+    out = {
+        "idx": it.get("idx"),
+        "kind": it.get("kind"),
+        "directions": it.get("directions") or [],
+        "final": it.get("final") or [],
+    }
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────
+# v2.8 routes — Form → Directions → Iterate → Final 10 → Choose
+# ──────────────────────────────────────────────────────────────────
+
+
+@router.post("/start", response_model=IdeationStartV2Response)
 async def start_ideation(
+    body: IdeationStartV2Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """v2.8 — create a new ideation from the structured Step-1 inputs.
+
+    Does NOT auto-run directions; the frontend explicitly calls
+    POST /{id}/directions when the user clicks the CTA on Step 2.
+    """
+    selection = _selection_from_inputs(body.inputs)
+    _enforce_selection_access(selection, current_user)
+
+    cid = uuid.uuid4().hex[:16]
+    inputs_dict = body.inputs.model_dump() if hasattr(body.inputs, "model_dump") else body.inputs.dict()
+    sel_dict = selection.model_dump() if hasattr(selection, "model_dump") else selection.dict()
+
+    db = get_firestore()
+    db.collection(_COLL).document(cid).set({
+        "user_id": current_user.get("uid", ""),
+        "user_email": current_user.get("sub", ""),
+        "schema_version": 2,
+        "phase": "inputs",
+        "inputs": inputs_dict,
+        "selection": sel_dict,
+        "iterations": [],
+        "chosen_final_index": None,
+        "linked_campaign_id": None,
+        "app_version": APP_VERSION,
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
+
+    _audit_safe("ideation_start_v2", current_user, {
+        "ideation_id": cid,
+        "offer_name": (body.inputs.offer_name or "")[:120],
+        "audience_axis": body.inputs.audience_axis,
+        "tone_axis": body.inputs.tone_axis,
+        "is_loyalty": bool(body.inputs.hotels_resolution.is_loyalty),
+        "hotel_count": len(body.inputs.hotels_resolution.resolved_hotel_ids or []),
+    })
+
+    return IdeationStartV2Response(ideation_id=cid)
+
+
+@router.post("/resolve-hotels", response_model=ResolveHotelsResponse)
+async def resolve_hotels_route(
+    body: ResolveHotelsRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Resolve a natural-language phrase to concrete hotel_ids. Called from
+    Step 1's 'Describe in words' mode. Does not persist anything — the
+    frontend renders chips, the user may edit, then submits via /start."""
+    if not (body.phrase or "").strip():
+        raise HTTPException(400, "Empty phrase.")
+
+    resolved = await _resolve_hotels(body.phrase.strip())
+
+    matched = [ResolvedHotelRef(**m) for m in resolved.get("matched", [])]
+
+    return ResolveHotelsResponse(
+        matched=matched,
+        resolved_hotel_ids=resolved.get("hotel_ids", []),
+        resolved_brand_ids=resolved.get("brand_ids", []),
+        is_loyalty=bool(resolved.get("is_loyalty")),
+        notes=resolved.get("notes", ""),
+    )
+
+
+@router.post("/{ideation_id}/directions", response_model=IdeationDirectionsResponse)
+async def directions_ideation(
+    ideation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Generate the first batch (or regenerate) of 3-5 directions x 5 concepts."""
+    db = get_firestore()
+    ref = db.collection(_COLL).document(ideation_id)
+    d = ref.get()
+    if not d.exists:
+        raise HTTPException(404, "Ideation not found.")
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    if data.get("schema_version", 1) < 2:
+        raise HTTPException(409, "Legacy v2.7 ideation — use /answer + /shortlist.")
+
+    inputs = data.get("inputs") or {}
+    hotel_context = _hotel_context_from_inputs(inputs)
+    iterations = data.get("iterations") or []
+    iter_num = len(iterations) + 1
+
+    result = await _generate_directions(
+        inputs=inputs,
+        iteration_seed=None,
+        iteration_number=iter_num,
+        hotel_context=hotel_context,
+    )
+
+    directions = [
+        IdeationDirection(
+            id=d.get("id"),
+            title=d.get("title"),
+            rationale=d.get("rationale"),
+            visual_cue=IdeationVisualCue(**(d.get("visual_cue") or {})),
+            concepts=[IdeationDirectionConcept(**c) for c in (d.get("concepts") or [])],
+        )
+        for d in result.get("directions", [])
+    ]
+
+    record = {
+        "idx": iter_num,
+        "kind": "directions",
+        "directions": [
+            dd.model_dump() if hasattr(dd, "model_dump") else dd.dict() for dd in directions
+        ],
+        "final": [],
+        "seed_direction_id": None,
+        "seed_concept_ids": [],
+        "freetext_steer": "",
+        "created_at": _now(),
+    }
+
+    iterations.append(record)
+    ref.set({
+        "iterations": iterations,
+        "phase": "directions",
+        "updated_at": _now(),
+    }, merge=True)
+
+    _audit_safe("ideation_directions", current_user, {
+        "ideation_id": ideation_id,
+        "iteration": iter_num,
+        "tokens_consumed": int(result.get("tokens_used", 0)),
+        "model_used": result.get("model_used", ""),
+        "is_loyalty": bool((inputs.get("hotels_resolution") or {}).get("is_loyalty")),
+    })
+
+    return IdeationDirectionsResponse(
+        iteration=iter_num,
+        directions=directions,
+        tokens_used=int(result.get("tokens_used", 0)),
+        model_used=str(result.get("model_used", "")),
+    )
+
+
+@router.post("/{ideation_id}/refine", response_model=IdeationDirectionsResponse)
+async def refine_ideation(
+    ideation_id: str,
+    body: IdeationRefineRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Refine the directions based on the user's selection + free-text steer."""
+    db = get_firestore()
+    ref = db.collection(_COLL).document(ideation_id)
+    d = ref.get()
+    if not d.exists:
+        raise HTTPException(404, "Ideation not found.")
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    if data.get("schema_version", 1) < 2:
+        raise HTTPException(409, "Legacy v2.7 ideation — use /answer + /shortlist.")
+
+    inputs = data.get("inputs") or {}
+    iterations = data.get("iterations") or []
+    iter_num = len(iterations) + 1
+    hotel_context = _hotel_context_from_inputs(inputs)
+
+    # Build seed: titles + names from prior iterations are anti-examples.
+    prior_titles: list[str] = []
+    prior_names: list[str] = []
+    for it in iterations:
+        for d2 in (it.get("directions") or []):
+            prior_titles.append(d2.get("title", ""))
+            for cc in (d2.get("concepts") or []):
+                prior_names.append(cc.get("name", ""))
+
+    seed = {
+        "selected_direction_id": body.selected_direction_id,
+        "selected_concept_ids": body.selected_concept_ids or [],
+        "freetext_steer": (body.freetext_steer or "").strip(),
+        "prior_direction_titles": prior_titles,
+        "prior_concept_names": prior_names,
+    }
+
+    result = await _generate_directions(
+        inputs=inputs,
+        iteration_seed=seed,
+        iteration_number=iter_num,
+        hotel_context=hotel_context,
+    )
+
+    directions = [
+        IdeationDirection(
+            id=d.get("id"),
+            title=d.get("title"),
+            rationale=d.get("rationale"),
+            visual_cue=IdeationVisualCue(**(d.get("visual_cue") or {})),
+            concepts=[IdeationDirectionConcept(**c) for c in (d.get("concepts") or [])],
+        )
+        for d in result.get("directions", [])
+    ]
+
+    record = {
+        "idx": iter_num,
+        "kind": "directions",
+        "directions": [
+            dd.model_dump() if hasattr(dd, "model_dump") else dd.dict() for dd in directions
+        ],
+        "final": [],
+        "seed_direction_id": body.selected_direction_id,
+        "seed_concept_ids": list(body.selected_concept_ids or []),
+        "freetext_steer": (body.freetext_steer or "").strip()[:500],
+        "created_at": _now(),
+    }
+    iterations.append(record)
+    ref.set({
+        "iterations": iterations,
+        "phase": "refining",
+        "updated_at": _now(),
+    }, merge=True)
+
+    _audit_safe("ideation_refine", current_user, {
+        "ideation_id": ideation_id,
+        "iteration": iter_num,
+        "tokens_consumed": int(result.get("tokens_used", 0)),
+        "model_used": result.get("model_used", ""),
+        "seed_count": len(body.selected_concept_ids or []),
+    })
+
+    return IdeationDirectionsResponse(
+        iteration=iter_num,
+        directions=directions,
+        tokens_used=int(result.get("tokens_used", 0)),
+        model_used=str(result.get("model_used", "")),
+    )
+
+
+@router.post("/{ideation_id}/finalize", response_model=IdeationFinalResponse)
+async def finalize_ideation(
+    ideation_id: str,
+    body: IdeationFinalizeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Generate (or regenerate) the Final 10 polished concepts. With
+    seed_concept_ids + freetext_steer, replaces the prior Final 10 with a
+    fresh batch (merge semantic)."""
+    db = get_firestore()
+    ref = db.collection(_COLL).document(ideation_id)
+    d = ref.get()
+    if not d.exists:
+        raise HTTPException(404, "Ideation not found.")
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    if data.get("schema_version", 1) < 2:
+        raise HTTPException(409, "Legacy v2.7 ideation — use /shortlist + /choose.")
+
+    inputs = data.get("inputs") or {}
+    iterations = data.get("iterations") or []
+    iter_num = len(iterations) + 1
+    hotel_context = _hotel_context_from_inputs(inputs)
+
+    result = await _generate_final_concepts(
+        inputs=inputs,
+        iterations=[_slim_iteration_record(it) for it in iterations],
+        seed_concept_ids=list(body.seed_concept_ids or []),
+        freetext_steer=(body.freetext_steer or "").strip(),
+        hotel_context=hotel_context,
+    )
+
+    concepts = [IdeationFinalConcept(
+        id=c.get("id"),
+        name=c.get("name"),
+        justification=c.get("justification"),
+        visual_cue=IdeationVisualCue(**(c.get("visual_cue") or {})),
+        inspiration_asset_ids=list(c.get("inspiration_asset_ids") or []),
+    ) for c in result.get("concepts", [])]
+
+    record = {
+        "idx": iter_num,
+        "kind": "final",
+        "directions": [],
+        "final": [
+            cc.model_dump() if hasattr(cc, "model_dump") else cc.dict() for cc in concepts
+        ],
+        "seed_direction_id": None,
+        "seed_concept_ids": list(body.seed_concept_ids or []),
+        "freetext_steer": (body.freetext_steer or "").strip()[:500],
+        "created_at": _now(),
+    }
+    iterations.append(record)
+    ref.set({
+        "iterations": iterations,
+        "phase": "final",
+        "updated_at": _now(),
+    }, merge=True)
+
+    _audit_safe("ideation_finalize", current_user, {
+        "ideation_id": ideation_id,
+        "iteration": iter_num,
+        "tokens_consumed": int(result.get("tokens_used", 0)),
+        "model_used": result.get("model_used", ""),
+        "seed_count": len(body.seed_concept_ids or []),
+    })
+
+    return IdeationFinalResponse(
+        iteration=iter_num,
+        concepts=concepts,
+        tokens_used=int(result.get("tokens_used", 0)),
+        model_used=str(result.get("model_used", "")),
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
+# Legacy v2.7 — kept for in-progress ideations on phase ∈ {critique, shortlist}.
+# ──────────────────────────────────────────────────────────────────
+
+
+@router.post("/start-legacy", response_model=IdeationStartResponse)
+async def start_ideation_legacy(
     body: IdeationStartRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Create a new ideation doc and return the first critique question."""
+    """Legacy v2.7 entry point. The current frontend no longer calls this —
+    kept only for debugging old data or rolling back the UI."""
     _enforce_selection_access(body.selection, current_user)
 
     scope_summary = _scope_summary(body.selection)
@@ -178,6 +581,7 @@ async def start_ideation(
     db.collection(_COLL).document(cid).set({
         "user_id": current_user.get("uid", ""),
         "user_email": current_user.get("sub", ""),
+        "schema_version": 1,
         "selection": body.selection.model_dump() if hasattr(body.selection, "model_dump") else body.selection.dict(),
         "theme_text": body.theme_text,
         "date_start": body.date_start or "",
@@ -193,7 +597,7 @@ async def start_ideation(
         "updated_at": _now(),
     })
 
-    _audit_safe("ideation_start", current_user, {
+    _audit_safe("ideation_start_legacy", current_user, {
         "ideation_id": cid,
         "theme_text": (body.theme_text or "")[:200],
         "scope": body.selection.scope if body.selection else "",
@@ -326,13 +730,13 @@ async def shortlist_ideation(
 
 
 @router.post("/{ideation_id}/choose", response_model=IdeationChooseResponse)
-async def choose_shortlist(
+async def choose_concept(
     ideation_id: str,
     body: IdeationChooseRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Promote a shortlist item to a draft `unified_campaigns` document and
-    record the link on the ideation."""
+    """Promote a chosen concept (v2.8 final concept OR v2.7 shortlist item)
+    to a draft `unified_campaigns` document."""
     db = get_firestore()
     ref = db.collection(_COLL).document(ideation_id)
     d = ref.get()
@@ -341,22 +745,41 @@ async def choose_shortlist(
     data = d.to_dict() or {}
     _require_owner_or_admin(data, current_user)
 
-    shortlist = data.get("shortlist") or []
-    if not shortlist:
-        raise HTTPException(409, "No shortlist yet — POST /shortlist first.")
-    if body.index < 0 or body.index >= len(shortlist):
-        raise HTTPException(400, f"index out of range (0..{len(shortlist)-1}).")
-
-    item = shortlist[body.index]
+    schema_version = int(data.get("schema_version") or 1)
     selection = data.get("selection") or {}
 
-    raw_brief = _compose_raw_brief(
-        item=item,
-        theme_text=data.get("theme_text", ""),
-        date_start=data.get("date_start", ""),
-        date_end=data.get("date_end", ""),
-        captured=data.get("captured", {}),
-    )
+    if schema_version >= 2:
+        # v2.8 — read the most recent final iteration.
+        iterations = data.get("iterations") or []
+        latest_final = None
+        for it in reversed(iterations):
+            if it.get("kind") == "final" and it.get("final"):
+                latest_final = it
+                break
+        if not latest_final:
+            raise HTTPException(409, "No final concepts yet — POST /finalize first.")
+        concepts = latest_final.get("final") or []
+        if body.index < 0 or body.index >= len(concepts):
+            raise HTTPException(400, f"index out of range (0..{len(concepts)-1}).")
+        item = concepts[body.index]
+        raw_brief = _compose_raw_brief_v2(item, data.get("inputs") or {})
+        campaign_name = (item.get("name") or "").strip()[:60]
+    else:
+        # v2.7 legacy — read shortlist field.
+        shortlist = data.get("shortlist") or []
+        if not shortlist:
+            raise HTTPException(409, "No shortlist yet — POST /shortlist first.")
+        if body.index < 0 or body.index >= len(shortlist):
+            raise HTTPException(400, f"index out of range (0..{len(shortlist)-1}).")
+        item = shortlist[body.index]
+        raw_brief = _compose_raw_brief(
+            item=item,
+            theme_text=data.get("theme_text", ""),
+            date_start=data.get("date_start", ""),
+            date_end=data.get("date_end", ""),
+            captured=data.get("captured", {}),
+        )
+        campaign_name = (item.get("name") or "").strip()[:60]
 
     cid = uuid.uuid4().hex[:16]
     db.collection(_CAMPAIGNS_COLL).document(cid).set({
@@ -365,7 +788,7 @@ async def choose_shortlist(
         "status": "draft",
         "raw_brief": raw_brief,
         "reference_urls": [],
-        "structured": None,
+        "structured": {"campaign_name": campaign_name} if campaign_name else None,
         "events": [],
         "selection": selection,
         "generated": [],
@@ -376,15 +799,24 @@ async def choose_shortlist(
         "locked_at": None,
     })
 
-    ref.set({
-        "chosen_index": body.index,
-        "linked_campaign_id": cid,
-        "phase": "chosen",
-        "updated_at": _now(),
-    }, merge=True)
+    if schema_version >= 2:
+        ref.set({
+            "chosen_final_index": body.index,
+            "linked_campaign_id": cid,
+            "phase": "chosen",
+            "updated_at": _now(),
+        }, merge=True)
+    else:
+        ref.set({
+            "chosen_index": body.index,
+            "linked_campaign_id": cid,
+            "phase": "chosen",
+            "updated_at": _now(),
+        }, merge=True)
 
     _audit_safe("ideation_choose", current_user, {
         "ideation_id": ideation_id,
+        "schema_version": schema_version,
         "chosen_index": body.index,
         "unified_campaign_id": cid,
     })
@@ -396,7 +828,53 @@ async def choose_shortlist(
     )
 
 
-@router.get("/{ideation_id}", response_model=IdeationState)
+def _compose_raw_brief_v2(concept: dict, inputs: dict) -> str:
+    """Compose a Unified-Campaign raw_brief from a v2.8 final concept + inputs."""
+    lines: list[str] = []
+    name = (concept.get("name") or "").strip()
+    if name:
+        lines.append(f"Campaign: {name}")
+    if concept.get("justification"):
+        lines.append(f"Why: {concept['justification']}")
+    offer = inputs.get("offer_name") or ""
+    inclusions = inputs.get("inclusions") or ""
+    if offer:
+        lines.append(f"Offer: {offer}")
+    if inclusions:
+        lines.append(f"Inclusions: {inclusions}")
+    discount = inputs.get("discount") or {}
+    if discount.get("kind") and discount.get("kind") != "no_discount":
+        lines.append(f"Discount: {discount.get('kind')} = {discount.get('value', '')}")
+    if inputs.get("audience_axis"):
+        lines.append(f"Audience: {inputs['audience_axis'].replace('_', ' ')}")
+    if inputs.get("tone_axis"):
+        lines.append(f"Tone: {inputs['tone_axis']}")
+    vc = concept.get("visual_cue") or {}
+    if vc:
+        lines.append("")
+        lines.append("Visual direction:")
+        if vc.get("palette"):
+            lines.append(f"  Palette: {', '.join(vc['palette'])}")
+        if vc.get("motifs"):
+            lines.append(f"  Motifs: {', '.join(vc['motifs'])}")
+        if vc.get("photography_style"):
+            lines.append(f"  Photography: {vc['photography_style']}")
+        if vc.get("mood"):
+            lines.append(f"  Mood: {vc['mood']}")
+        if vc.get("logo_placement"):
+            lines.append(f"  Logo: {vc['logo_placement']}")
+    return "\n".join(lines).strip()
+
+
+def _doc_to_payload(doc) -> dict:
+    """Return the raw doc as a JSON-safe dict so both v2.7 and v2.8 shapes
+    flow through the GET endpoints unchanged. The frontend keys off
+    `schema_version` to pick the right renderer."""
+    data = doc.to_dict() or {}
+    return {"id": doc.id, **data}
+
+
+@router.get("/{ideation_id}")
 async def get_ideation(
     ideation_id: str,
     current_user: dict = Depends(get_current_user),
@@ -406,10 +884,10 @@ async def get_ideation(
     if not d.exists:
         raise HTTPException(404, "Ideation not found.")
     _require_owner_or_admin(d.to_dict() or {}, current_user)
-    return _doc_to_state(d)
+    return _doc_to_payload(d)
 
 
-@router.get("", response_model=list[IdeationState])
+@router.get("")
 async def list_ideations(
     limit: int = 30,
     current_user: dict = Depends(get_current_user),
@@ -425,10 +903,10 @@ async def list_ideations(
         docs = list(coll.limit(max(limit * 3, 30)).stream())
         docs.sort(key=lambda d: (d.to_dict() or {}).get("updated_at", ""), reverse=True)
         docs = docs[:limit]
-    return [_doc_to_state(d) for d in docs]
+    return [_doc_to_payload(d) for d in docs]
 
 
-@router.post("/{ideation_id}/archive", response_model=IdeationState)
+@router.post("/{ideation_id}/archive")
 async def archive_ideation(
     ideation_id: str,
     current_user: dict = Depends(get_current_user),
@@ -440,7 +918,7 @@ async def archive_ideation(
         raise HTTPException(404, "Ideation not found.")
     _require_owner_or_admin(d.to_dict() or {}, current_user)
     ref.set({"phase": "archived", "updated_at": _now()}, merge=True)
-    return _doc_to_state(ref.get())
+    return _doc_to_payload(ref.get())
 
 
 def _compose_raw_brief(

@@ -7,5 +7,5 @@ Why a tiny module: many places need it (FastAPI metadata, /health response,
 BigQuery audit rows, structured logs). Having one constant is cheaper than
 threading it through env vars.
 """
-APP_VERSION = "2.7.6"
-APP_VERSION_DATE = "2026-05-15"   # date this version went live
+APP_VERSION = "2.8"
+APP_VERSION_DATE = "2026-05-17"   # date this version went live

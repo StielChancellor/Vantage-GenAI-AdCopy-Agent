@@ -627,3 +627,149 @@ class CreativePackUploadResponse(BaseModel):
     images_found: int
     rows_in_manifest: int
     status: str                                # "started" | "completed" | "failed"
+
+
+# ── Campaign Ideation v2.8 (Form → Directions → Final 10 → Handoff) ────
+# Supersedes the v2.7 chat-coach flow. Old IdeationStartRequest /
+# IdeationAnswerRequest / IdeationState above stay for in-progress
+# v2.7 ideations on phase ∈ {critique, shortlist}.
+
+class IdeationDiscount(BaseModel):
+    """Structured discount field on the Step-1 brief."""
+    kind: Literal["percent_off", "flat_amount", "bogo", "free_upgrade", "no_discount"] = "no_discount"
+    value: str = ""                            # free-text value when kind needs it
+
+
+class IdeationHotelsResolution(BaseModel):
+    """How the marketer told us which properties participate.
+    mode='list' uses IntelligentPropertyPicker output (hotel_ids/brand_ids).
+    mode='phrase' captures the natural-language string PLUS the LLM-resolved ids."""
+    mode: Literal["list", "phrase"] = "list"
+    phrase: Optional[str] = ""
+    resolved_hotel_ids: list[str] = []
+    resolved_brand_ids: list[str] = []
+    is_loyalty: bool = False
+
+
+class IdeationInputs(BaseModel):
+    """Step-1 form payload. The single structured input the v2.8 generator reads."""
+    offer_name: str
+    inclusions: str = ""
+    discount: IdeationDiscount = IdeationDiscount()
+    hotels_resolution: IdeationHotelsResolution
+    audience_axis: Literal["business", "in_between", "leisure"] = "in_between"
+    tone_axis: Literal["tactical", "hybrid", "aspirational"] = "hybrid"
+
+
+class ResolvedHotelRef(BaseModel):
+    hotel_id: str
+    name: str
+    brand: Optional[str] = ""
+    brand_id: Optional[str] = ""
+    city: Optional[str] = ""
+
+
+class ResolveHotelsRequest(BaseModel):
+    phrase: str
+
+
+class ResolveHotelsResponse(BaseModel):
+    matched: list[ResolvedHotelRef] = []
+    resolved_hotel_ids: list[str] = []
+    resolved_brand_ids: list[str] = []
+    is_loyalty: bool = False
+    notes: Optional[str] = ""                  # model's reasoning, surfaced as a sub-label
+
+
+class IdeationStartV2Request(BaseModel):
+    inputs: IdeationInputs
+
+
+class IdeationStartV2Response(BaseModel):
+    ideation_id: str
+
+
+class IdeationVisualCue(BaseModel):
+    palette: list[str] = []                    # short tokens, e.g. "mist", "ochre"
+    motifs: list[str] = []
+    photography_style: str = ""
+    mood: str = ""
+    logo_placement: str = ""
+
+
+class IdeationDirectionConcept(BaseModel):
+    id: str                                    # stable across this directions batch, used as seed reference
+    name: str                                  # ≤ 8 words
+    justification: str                         # 1 line
+
+
+class IdeationDirection(BaseModel):
+    id: str                                    # e.g. "dir_aspirational_stillness"
+    title: str                                 # e.g. "Aspirational — Mountain Stillness"
+    rationale: str                             # 1 sentence
+    visual_cue: IdeationVisualCue
+    concepts: list[IdeationDirectionConcept]   # exactly 5 per direction
+
+
+class IdeationDirectionsResponse(BaseModel):
+    iteration: int                              # 1-based; increments per /directions or /refine call
+    directions: list[IdeationDirection]        # 3–5 entries
+    tokens_used: int = 0
+    model_used: str = ""
+
+
+class IdeationRefineRequest(BaseModel):
+    selected_direction_id: Optional[str] = None
+    selected_concept_ids: list[str] = []
+    freetext_steer: str = ""
+
+
+class IdeationFinalConcept(BaseModel):
+    id: str                                    # stable across the final batch
+    name: str
+    justification: str
+    visual_cue: IdeationVisualCue
+    inspiration_asset_ids: list[str] = []      # reserved for Phase-3 moodboard
+
+
+class IdeationFinalizeRequest(BaseModel):
+    """Empty body = first finalize call. seed_concept_ids + freetext_steer
+    on subsequent calls produce a fresh batch of 10 (merge semantic)."""
+    seed_concept_ids: list[str] = []
+    freetext_steer: str = ""
+
+
+class IdeationFinalResponse(BaseModel):
+    iteration: int                             # bumped per /finalize call
+    concepts: list[IdeationFinalConcept]       # exactly 10
+    tokens_used: int = 0
+    model_used: str = ""
+
+
+class IdeationIterationRecord(BaseModel):
+    """One entry in the persisted iterations history."""
+    idx: int
+    kind: Literal["directions", "final"]
+    directions: list[IdeationDirection] = []
+    final: list[IdeationFinalConcept] = []
+    seed_direction_id: Optional[str] = None
+    seed_concept_ids: list[str] = []
+    freetext_steer: str = ""
+    created_at: Optional[str] = None
+
+
+class IdeationStateV2(BaseModel):
+    """Full state document for a v2.8 ideation. Loaded by GET /ideation/{id}."""
+    id: str
+    user_id: str = ""
+    user_email: str = ""
+    schema_version: int = 2                    # 1 = legacy v2.7, 2 = v2.8
+    phase: Literal["inputs", "directions", "refining", "final", "chosen", "archived"] = "inputs"
+    inputs: Optional[IdeationInputs] = None
+    selection: Optional[PropertySelection] = None
+    iterations: list[IdeationIterationRecord] = []
+    chosen_final_index: Optional[int] = None
+    linked_campaign_id: Optional[str] = None
+    app_version: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
