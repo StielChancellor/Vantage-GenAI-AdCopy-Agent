@@ -20,6 +20,9 @@ import {
 import {
   createCampaign, getCampaign, patchCampaign, lockCampaign, unlockCampaign,
   generateCampaign, searchEvents, listPastBriefs, listIdeations,
+  // v3.0 streaming
+  generateCampaignAsync, getCampaignJob, getCampaignGenerations,
+  steerCampaign, cancelCampaign, regenStaleCampaign, resumeCampaign,
 } from '../services/api';
 import IntelligentPropertyPicker from '../components/IntelligentPropertyPicker';
 import EventCalendar from '../components/EventCalendar';
@@ -96,6 +99,15 @@ export default function UnifiedCampaign() {
   const [pastBriefs, setPastBriefs] = useState([]);
   const [ideatedCampaigns, setIdeatedCampaigns] = useState([]);
   const [loadingLanding, setLoadingLanding] = useState(false);
+
+  // v3.0 — streaming fan-out state
+  const [streamMode, setStreamMode] = useState(false);
+  const [jobState, setJobState] = useState(null);           // {job_id, total_tasks, ..., last_heartbeat}
+  const [streamRows, setStreamRows] = useState(new Map());  // idx -> GenerationRow
+  const [streamSince, setStreamSince] = useState(-1);
+  const [steerOpen, setSteerOpen] = useState(false);
+  const [steerStructured, setSteerStructured] = useState(null);
+  const [steerScope, setSteerScope] = useState('remaining');
 
   const isLocked = campaign?.status === 'locked';
   // v2.9 — when the campaign was promoted from an Ideation, skip the Brief step.
@@ -282,22 +294,64 @@ export default function UnifiedCampaign() {
   };
 
   // ── step 5 generate ──────────────────────────────────────────────
+  // v3.0 — Auto-pick streaming when the fan-out is large.
+  // entity count = hotel_ids + brand_ids + cities; total tasks roughly
+  // = entities * channels * levels (chain_plus_single doubles).
+  const entityCount = useMemo(() => (
+    (pickerSel?.hotel_ids?.length || 0)
+    + (pickerSel?.brand_ids?.length || 0)
+    + (pickerSel?.cities?.length || 0)
+  ), [pickerSel]);
+  const expectedTasks = useMemo(() => {
+    const lvl = (levelsSel || []).reduce((a, l) => a + (l === 'chain_plus_single' ? 2 : 1), 0) || 1;
+    const ch = (channelsSel || []).length || 1;
+    return Math.max(entityCount * ch * lvl, 1);
+  }, [entityCount, levelsSel, channelsSel]);
+  const useStream = expectedTasks > 5;
+
   const runGenerate = async () => {
     if (!campaign) return;
+    const sel = {
+      scope: pickerSel.scope || 'multi',
+      hotel_id: pickerSel.hotel_ids?.[0] || '',
+      brand_id: pickerSel.brand_ids?.[0] || '',
+      hotel_ids: pickerSel.hotel_ids || [],
+      brand_ids: pickerSel.brand_ids || [],
+      cities: pickerSel.cities || [],
+      is_loyalty: !!pickerSel.is_loyalty,
+      campaign_levels: levelsSel,
+      channels: channelsSel,
+    };
+
+    if (useStream) {
+      // Streaming path — POST returns in <1s, polling drives the UI.
+      setGenerating(true);
+      setResults([]);
+      setStreamRows(new Map());
+      setStreamSince(-1);
+      try {
+        const r = await generateCampaignAsync(campaign.id, sel);
+        setJobState({
+          job_id: r.data?.job_id,
+          total_tasks: r.data?.total_tasks,
+          brief_revision: r.data?.brief_revision || 0,
+          completed_tasks: 0, failed_tasks: 0, stale_tasks: 0,
+          cancelled: false,
+          last_heartbeat: new Date().toISOString(),
+        });
+        setStreamMode(true);
+        toast.success(`Generating ${r.data?.total_tasks || 0} ad copies — streaming in.`);
+      } catch (err) {
+        toast.error(err.response?.data?.detail || 'Could not start streaming generation.');
+        setGenerating(false);
+      }
+      return;
+    }
+
+    // Legacy sync path for small fan-outs (1-5 tasks).
     setGenerating(true);
     setResults([]);
     try {
-      const sel = {
-        scope: pickerSel.scope || 'multi',
-        hotel_id: pickerSel.hotel_ids?.[0] || '',
-        brand_id: pickerSel.brand_ids?.[0] || '',
-        hotel_ids: pickerSel.hotel_ids || [],
-        brand_ids: pickerSel.brand_ids || [],
-        cities: pickerSel.cities || [],
-        is_loyalty: !!pickerSel.is_loyalty,
-        campaign_levels: levelsSel,
-        channels: channelsSel,
-      };
       const r = await generateCampaign(campaign.id, { selection: sel });
       setResults(r.data?.results || []);
       toast.success(`Generated ${r.data?.results?.length || 0} group(s) · ${r.data?.total_tokens || 0} tokens.`);
@@ -307,6 +361,124 @@ export default function UnifiedCampaign() {
       setGenerating(false);
     }
   };
+
+  // v3.0 — Streaming polling loop. Runs while streamMode=true.
+  // Polls /generations every 2s and merges into streamRows Map.
+  useEffect(() => {
+    if (!streamMode || !campaign?.id) return undefined;
+    let cancelled = false;
+    let timer = null;
+
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const [jobResp, gensResp] = await Promise.all([
+          getCampaignJob(campaign.id),
+          getCampaignGenerations(campaign.id, streamSince, 200),
+        ]);
+        if (cancelled) return;
+        const job = jobResp.data?.job;
+        if (job) setJobState(job);
+        const newRows = gensResp.data?.rows || [];
+        if (newRows.length > 0) {
+          setStreamRows((prev) => {
+            const next = new Map(prev);
+            newRows.forEach((row) => next.set(row.idx, row));
+            return next;
+          });
+          const maxIdx = newRows.reduce((m, r) => Math.max(m, r.idx), streamSince);
+          setStreamSince(maxIdx);
+        }
+        // Stop polling when terminal.
+        const total = job?.total_tasks || 0;
+        const done = (job?.completed_tasks || 0) + (job?.failed_tasks || 0);
+        const stale = job?.stale_tasks || 0;
+        if (total > 0 && (done + stale) >= total) {
+          setGenerating(false);
+          // Mirror into the legacy results array for the existing CSV download path.
+          const arr = Array.from(new Map(streamRows).values())
+            .filter((r) => r.status === 'complete')
+            .sort((a, b) => a.idx - b.idx);
+          if (arr.length > 0) setResults(arr);
+          if (!cancelled) timer = setTimeout(tick, 5000);   // slower idle poll
+          return;
+        }
+      } catch (err) {
+        // Tolerate transient errors, keep polling.
+      }
+      if (!cancelled) timer = setTimeout(tick, 2000);
+    };
+    tick();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamMode, campaign?.id]);
+
+  // Hydrate streaming view when the campaign comes back as status='generating'.
+  useEffect(() => {
+    if (campaign?.status === 'generating' && !streamMode) {
+      setStreamMode(true);
+      setStreamSince(-1);
+      setStreamRows(new Map());
+      setGenerating(true);
+    }
+  }, [campaign?.status, streamMode]);
+
+  // Streaming-mode helpers
+  const onSteerSubmit = async () => {
+    if (!campaign?.id || !steerStructured) return;
+    try {
+      const r = await steerCampaign(campaign.id, steerStructured, steerScope);
+      toast.success(`Brief revision ${r.data?.brief_revision}. ${steerScope === 'all' ? `${r.data?.completed_marked_stale} completed cards flipped to stale.` : 'Remaining tasks will use the new brief.'}`);
+      setSteerOpen(false);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Steer failed.');
+    }
+  };
+  const onCancelJob = async () => {
+    if (!campaign?.id) return;
+    if (!window.confirm('Cancel this job? Pending tasks will stop. You can resume later.')) return;
+    try {
+      await cancelCampaign(campaign.id);
+      toast.success('Cancelling — in-flight tasks will finish, queued ones will stop.');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Cancel failed.');
+    }
+  };
+  const onRegenStale = async () => {
+    if (!campaign?.id) return;
+    try {
+      const r = await regenStaleCampaign(campaign.id);
+      toast.success(`${r.data?.flipped} stale rows queued for regeneration.`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Regen-stale failed.');
+    }
+  };
+  const onResumeJob = async () => {
+    if (!campaign?.id) return;
+    try {
+      await resumeCampaign(campaign.id);
+      toast.success('Resumed.');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Resume failed.');
+    }
+  };
+
+  // Heartbeat-stale detection (>60s old)
+  const heartbeatStale = useMemo(() => {
+    if (!jobState?.last_heartbeat) return false;
+    const total = jobState.total_tasks || 0;
+    const done = (jobState.completed_tasks || 0) + (jobState.failed_tasks || 0);
+    if (total > 0 && done >= total) return false;
+    const last = new Date(jobState.last_heartbeat).getTime();
+    return (Date.now() - last) > 60_000;
+  }, [jobState]);
+
+  const streamArray = useMemo(() => Array.from(streamRows.values()).sort((a, b) => a.idx - b.idx), [streamRows]);
+  const counts = useMemo(() => {
+    const c = { pending: 0, running: 0, complete: 0, failed: 0, stale: 0 };
+    streamArray.forEach((r) => { c[r.status] = (c[r.status] || 0) + 1; });
+    return c;
+  }, [streamArray]);
 
   const downloadCsv = () => {
     const rows = [['campaign', 'entity', 'scope', 'channel', 'level', 'idx', 'headline', 'description']];
@@ -679,18 +851,143 @@ export default function UnifiedCampaign() {
         {step === 5 && (
           <section className="wizard-panel">
             <h2>Generate the campaign</h2>
-            {!results.length && !generating && (
+            {!results.length && !generating && !streamMode && (
               <>
                 <p style={{ color: 'var(--em-ink-soft)', fontSize: 13 }}>
                   Click Generate. The orchestrator scrapes your reference URLs, fetches reviews, pulls past learning, and
                   produces ad copies for every selected entity × channel × level (variants honour each channel's character limits).
+                  {useStream && (
+                    <span style={{ display: 'block', marginTop: 6, fontStyle: 'italic' }}>
+                      <strong>{expectedTasks}</strong> ad copies expected — streaming as they're ready. You can steer the brief mid-flight.
+                    </span>
+                  )}
                 </p>
                 <button className="btn btn-primary btn-generate" onClick={runGenerate}>
                   <Zap size={16} /> Generate campaign
                 </button>
               </>
             )}
-            {generating && <GenerationProgress />}
+
+            {/* v3.0 — Streaming view */}
+            {streamMode && (
+              <div className="streaming-view">
+                <div className="streaming-header em-card" style={{ padding: 14, marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <div>
+                      <strong>
+                        {counts.complete + counts.failed} / {jobState?.total_tasks || streamArray.length || expectedTasks} complete
+                      </strong>
+                      <span style={{ color: 'var(--em-ink-soft)', marginLeft: 12, fontSize: 13 }}>
+                        running {counts.running} · pending {counts.pending} · failed {counts.failed}
+                        {counts.stale > 0 && ` · stale ${counts.stale}`}
+                      </span>
+                      {jobState && (
+                        <span style={{ color: 'var(--em-ink-soft)', marginLeft: 12, fontSize: 12, fontFamily: 'var(--em-mono, monospace)' }}>
+                          rev {jobState.brief_revision || 0}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-outline btn-sm" onClick={() => {
+                        setSteerStructured({ ...structured });
+                        setSteerScope('remaining');
+                        setSteerOpen(true);
+                      }}>
+                        <Sparkles size={14} /> Steer the brief
+                      </button>
+                      {counts.stale > 0 && (
+                        <button className="btn btn-outline btn-sm" onClick={onRegenStale}>
+                          <Sparkles size={14} /> Regen {counts.stale} stale
+                        </button>
+                      )}
+                      <button className="btn btn-outline btn-sm" onClick={onCancelJob}>
+                        <X size={14} /> Cancel
+                      </button>
+                    </div>
+                  </div>
+                  <div className="stream-progress-bar" style={{ marginTop: 10 }}>
+                    <div
+                      className="stream-progress-fill"
+                      style={{
+                        width: `${jobState?.total_tasks ? Math.round(100 * (counts.complete + counts.failed) / jobState.total_tasks) : 0}%`,
+                      }}
+                    />
+                  </div>
+                  {heartbeatStale && (
+                    <div className="stream-stalled-banner">
+                      Worker appears stalled — last heartbeat over 60 s ago.
+                      <button className="btn btn-outline btn-sm" onClick={onResumeJob} style={{ marginLeft: 12 }}>Resume</button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="streaming-grid">
+                  {streamArray.map((row) => (
+                    <article key={row.idx} className={`stream-row stream-row-${row.status}`}>
+                      <div className="stream-row-head">
+                        <span className="stream-idx">#{row.idx + 1}</span>
+                        <strong className="stream-label">{row.label || `Task ${row.idx + 1}`}</strong>
+                        <span className="em-pill muted">{row.channel}</span>
+                        <span className="em-pill muted">{row.level}</span>
+                        <span className={`stream-status stream-status-${row.status}`}>{row.status}</span>
+                      </div>
+                      {row.status === 'complete' && Array.isArray(row.variants) && row.variants.length > 0 && (
+                        <div className="stream-row-body">
+                          {row.variants.slice(0, 1).map((v, i) => (
+                            <VariantBlock key={i} variant={v} />
+                          ))}
+                          {row.variants.length > 1 && (
+                            <p style={{ color: 'var(--em-ink-soft)', fontSize: 12, margin: '6px 0 0' }}>
+                              + {row.variants.length - 1} more variant{row.variants.length > 2 ? 's' : ''} in the export
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {row.status === 'failed' && (
+                        <div className="stream-row-error">{row.error || 'Failed'}</div>
+                      )}
+                      {row.status === 'stale' && (
+                        <div style={{ color: 'var(--em-ink-soft)', fontSize: 12, fontStyle: 'italic' }}>
+                          Brief changed since this card was generated. Click "Regen stale" above to refresh.
+                        </div>
+                      )}
+                      {(row.status === 'pending' || row.status === 'running') && (
+                        <div className="stream-row-skeleton">
+                          <div className="skel-line" />
+                          <div className="skel-line skel-line-short" />
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                  {/* Placeholders for tasks the server hasn't surfaced yet */}
+                  {jobState?.total_tasks > streamArray.length && (
+                    Array.from({ length: jobState.total_tasks - streamArray.length }).slice(0, 50).map((_, i) => (
+                      <article key={`ph-${i}`} className="stream-row stream-row-pending">
+                        <div className="stream-row-head">
+                          <span className="stream-idx">#{streamArray.length + i + 1}</span>
+                          <span style={{ color: 'var(--em-ink-soft)' }}>queued</span>
+                          <span className="stream-status stream-status-pending">pending</span>
+                        </div>
+                        <div className="stream-row-skeleton">
+                          <div className="skel-line" />
+                          <div className="skel-line skel-line-short" />
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+
+                {(counts.complete + counts.failed + counts.stale) >= (jobState?.total_tasks || 0) && jobState?.total_tasks > 0 && (
+                  <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button className="btn btn-primary" onClick={downloadCsv}>
+                      <Download size={14} /> Export CSV
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {generating && !streamMode && <GenerationProgress />}
             {!generating && results.length > 0 && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -750,6 +1047,59 @@ export default function UnifiedCampaign() {
         )}
       </div>
       </>
+      )}
+
+      {/* v3.0 — Steer-brief modal */}
+      {steerOpen && steerStructured && (
+        <div className="modal-backdrop" onClick={(e) => { if (e.target.classList.contains('modal-backdrop')) setSteerOpen(false); }}>
+          <div className="modal-shell">
+            <header className="modal-head">
+              <h3 style={{ margin: 0 }}>Steer the brief</h3>
+              <button className="modal-x" onClick={() => setSteerOpen(false)}><X size={16} /></button>
+            </header>
+            <div className="modal-body">
+              <p style={{ color: 'var(--em-ink-soft)', fontSize: 13, marginTop: 0 }}>
+                Edit the structured brief. <strong>Remaining tasks</strong> will be generated with the new brief;
+                <strong> already-completed</strong> ones can be flipped to stale (one-click regen).
+              </p>
+              <div className="form-row">
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label>Campaign name</label>
+                  <input type="text" value={steerStructured.campaign_name || ''} onChange={(e) => setSteerStructured({ ...steerStructured, campaign_name: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Inclusions</label>
+                <textarea rows={2} value={steerStructured.inclusions || ''} onChange={(e) => setSteerStructured({ ...steerStructured, inclusions: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Target audience</label>
+                <input type="text" value={steerStructured.target_audience || ''} onChange={(e) => setSteerStructured({ ...steerStructured, target_audience: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Summary / tone</label>
+                <textarea rows={3} value={steerStructured.summary || ''} onChange={(e) => setSteerStructured({ ...steerStructured, summary: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Apply steer to</label>
+                <div className="hotels-tabs">
+                  <button type="button" className={`tab-btn ${steerScope === 'remaining' ? 'active' : ''}`} onClick={() => setSteerScope('remaining')}>
+                    Remaining tasks only
+                  </button>
+                  <button type="button" className={`tab-btn ${steerScope === 'all' ? 'active' : ''}`} onClick={() => setSteerScope('all')}>
+                    All — flip completed to stale
+                  </button>
+                </div>
+              </div>
+            </div>
+            <footer className="modal-foot">
+              <button className="btn btn-outline" onClick={() => setSteerOpen(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={onSteerSubmit}>
+                <Sparkles size={14} /> Apply steer
+              </button>
+            </footer>
+          </div>
+        </div>
       )}
     </div>
   );

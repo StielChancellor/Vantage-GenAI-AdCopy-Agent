@@ -135,6 +135,22 @@ export const getCampaign = (id) => api.get(`/campaigns/${encodeURIComponent(id)}
 export const patchCampaign = (id, data) => api.patch(`/campaigns/${encodeURIComponent(id)}`, data);
 export const generateCampaign = (id, data) => api.post(`/campaigns/${encodeURIComponent(id)}/generate`, data, { timeout: 600000 });
 
+// v3.0 — Streaming fan-out
+export const generateCampaignAsync = (id, selection = null) =>
+  api.post(`/campaigns/${encodeURIComponent(id)}/generate-async`, selection ? { selection } : {}, { timeout: 30000 });
+export const getCampaignJob = (id) =>
+  api.get(`/campaigns/${encodeURIComponent(id)}/job`);
+export const getCampaignGenerations = (id, since = -1, limit = 200) =>
+  api.get(`/campaigns/${encodeURIComponent(id)}/generations?since=${since}&limit=${limit}`);
+export const steerCampaign = (id, structured, scope = 'remaining') =>
+  api.post(`/campaigns/${encodeURIComponent(id)}/steer`, { structured, scope });
+export const cancelCampaign = (id) =>
+  api.post(`/campaigns/${encodeURIComponent(id)}/cancel`, {});
+export const regenStaleCampaign = (id) =>
+  api.post(`/campaigns/${encodeURIComponent(id)}/regen-stale`, {});
+export const resumeCampaign = (id) =>
+  api.post(`/campaigns/${encodeURIComponent(id)}/resume`, {});
+
 // Campaign Ideation v2.8/v2.9 — Form → Directions → Final 10 → Handoff
 export const startIdeation = (inputs) => api.post('/ideation/start', { inputs });
 export const resolveHotels = (phrase) =>

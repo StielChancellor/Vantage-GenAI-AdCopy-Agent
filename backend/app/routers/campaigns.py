@@ -20,9 +20,14 @@ from backend.app.models.schemas import (
     UnifiedCampaignSelection, CampaignPatchRequest,
     CampaignGenerateRequest, CampaignGenerateResponse,
     PastBrief,
+    # v3.0 streaming
+    StartAsyncRequest, StartAsyncResponse, JobState, JobStateResponse,
+    GenerationRow, GenerationsListResponse,
+    SteerRequest, SteerResponse, RegenStaleResponse,
 )
 from backend.app.services.campaigns.structurer import structure_brief
 from backend.app.services.campaigns.orchestrator import run_campaign
+from backend.app.services.campaigns import streaming as _streaming
 from backend.app.services.ideation.campaign_id import (
     generate_campaign_id, ensure_campaign_id,
 )
@@ -291,3 +296,168 @@ async def generate_campaign(
         logger.warning("campaign_generate persist failed: %s", exc)
 
     return CampaignGenerateResponse(**result)
+
+
+# ──────────────────────────────────────────────────────────────────
+# v3.0 — Streaming fan-out
+# ──────────────────────────────────────────────────────────────────
+
+
+@router.post("/{campaign_id}/generate-async", response_model=StartAsyncResponse)
+async def generate_async(
+    campaign_id: str,
+    body: StartAsyncRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Kick off a streaming fan-out and return immediately.
+    The worker writes per-row results to the generations subcollection."""
+    db = get_firestore()
+    ref = db.collection(_COLL).document(campaign_id)
+    d = ref.get()
+    if not d.exists:
+        raise HTTPException(404, "Campaign not found.")
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+
+    try:
+        result = await _streaming.start_job(
+            campaign_id,
+            override_selection=body.selection,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error(
+            "campaign_generate_async_failed",
+            extra={"json_fields": {"campaign_id": campaign_id, "exc": str(exc)[:300]}},
+            exc_info=True,
+        )
+        raise HTTPException(500, f"Failed to start job: {str(exc)[:200]}")
+
+    return StartAsyncResponse(**result)
+
+
+@router.get("/{campaign_id}/job", response_model=JobStateResponse)
+async def get_job_state(
+    campaign_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_firestore()
+    d = db.collection(_COLL).document(campaign_id).get()
+    if not d.exists:
+        raise HTTPException(404, "Campaign not found.")
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    job_raw = data.get("job") or None
+    job = JobState(**job_raw) if job_raw else None
+    return JobStateResponse(status=data.get("status", "draft"), job=job)
+
+
+@router.get("/{campaign_id}/generations", response_model=GenerationsListResponse)
+async def list_generations(
+    campaign_id: str,
+    since: int = -1,
+    limit: int = 200,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return generation rows where idx > since, ordered ascending.
+    Polled every 2s by the streaming UI."""
+    db = get_firestore()
+    ref = db.collection(_COLL).document(campaign_id)
+    d = ref.get()
+    if not d.exists:
+        raise HTTPException(404, "Campaign not found.")
+    _require_owner_or_admin(d.to_dict() or {}, current_user)
+
+    rows: list[GenerationRow] = []
+    try:
+        # Stream and filter client-side — collection is small (≤ 400 rows).
+        # Firestore composite index on (idx,) lets us order if needed.
+        for doc in ref.collection("generations").stream():
+            data = doc.to_dict() or {}
+            idx = int(data.get("idx", -1))
+            if idx <= since:
+                continue
+            rows.append(GenerationRow(**data))
+    except Exception as exc:
+        logger.warning("list_generations failed: %s", exc)
+        raise HTTPException(500, "Could not load generations.")
+
+    rows.sort(key=lambda r: r.idx)
+    rows = rows[:limit]
+    next_since = rows[-1].idx if rows else since
+    return GenerationsListResponse(rows=rows, next_since=next_since)
+
+
+@router.post("/{campaign_id}/steer", response_model=SteerResponse)
+async def steer_job_route(
+    campaign_id: str,
+    body: SteerRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Apply a new brief mid-flight. brief_revision increments; remaining
+    tasks (and optionally the already-completed ones) get re-flagged."""
+    db = get_firestore()
+    d = db.collection(_COLL).document(campaign_id).get()
+    if not d.exists:
+        raise HTTPException(404, "Campaign not found.")
+    _require_owner_or_admin(d.to_dict() or {}, current_user)
+    try:
+        out = _streaming.steer_job(campaign_id, body.structured, scope=body.scope)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return SteerResponse(
+        brief_revision=out["brief_revision"],
+        completed_marked_stale=out["completed_marked_stale"],
+    )
+
+
+@router.post("/{campaign_id}/cancel")
+async def cancel_job_route(
+    campaign_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_firestore()
+    d = db.collection(_COLL).document(campaign_id).get()
+    if not d.exists:
+        raise HTTPException(404, "Campaign not found.")
+    _require_owner_or_admin(d.to_dict() or {}, current_user)
+    _streaming.cancel_job(campaign_id)
+    return {"cancelled": True}
+
+
+@router.post("/{campaign_id}/regen-stale", response_model=RegenStaleResponse)
+async def regen_stale_route(
+    campaign_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_firestore()
+    d = db.collection(_COLL).document(campaign_id).get()
+    if not d.exists:
+        raise HTTPException(404, "Campaign not found.")
+    _require_owner_or_admin(d.to_dict() or {}, current_user)
+    out = _streaming.regen_stale(campaign_id)
+    # Auto-spin the worker so the flipped rows actually run.
+    try:
+        restarted = await _streaming._ensure_worker(campaign_id)
+    except Exception as exc:
+        logger.warning("worker restart after regen-stale failed: %s", exc)
+        restarted = False
+    return RegenStaleResponse(flipped=out["flipped"], worker_restarted=bool(restarted))
+
+
+@router.post("/{campaign_id}/resume")
+async def resume_job_route(
+    campaign_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_firestore()
+    d = db.collection(_COLL).document(campaign_id).get()
+    if not d.exists:
+        raise HTTPException(404, "Campaign not found.")
+    _require_owner_or_admin(d.to_dict() or {}, current_user)
+    try:
+        started_new = await _streaming.resume_job(campaign_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"worker_started": bool(started_new)}

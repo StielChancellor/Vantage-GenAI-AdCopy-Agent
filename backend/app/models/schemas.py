@@ -518,6 +518,85 @@ class CampaignGenerateResponse(BaseModel):
     time_seconds: float = 0.0
 
 
+# ── v3.0 Streaming Unified Campaign fan-out ──────────────────────────
+# Big campaigns (50-100 entities) can't fit in a synchronous request.
+# /generate-async returns immediately with a job_id; a fire-and-forget
+# asyncio worker writes per-row results to a `generations` subcollection.
+# Frontend polls /generations every 2s.
+
+class JobState(BaseModel):
+    """State of a streaming Unified Campaign generation job.
+    Lives on the parent unified_campaigns/{id} doc under the `job` field."""
+    job_id: str
+    brief_revision: int = 0          # incremented on every /steer
+    total_tasks: int = 0
+    completed_tasks: int = 0
+    failed_tasks: int = 0
+    stale_tasks: int = 0
+    cancelled: bool = False
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    last_heartbeat: Optional[str] = None
+
+
+class GenerationRow(BaseModel):
+    """One row in the unified_campaigns/{id}/generations subcollection.
+    Represents a single (entity, channel, level) task in any of its states."""
+    idx: int
+    label: str = ""
+    scope: str = "hotel"             # 'hotel' | 'brand' | 'city' | 'loyalty'
+    hotel_id: Optional[str] = None
+    brand_id: Optional[str] = None
+    channel: str = "search_ads"      # 'search_ads' | 'meta_ads' | 'app_push'
+    level: str = "single"            # 'chain' | 'single'
+    status: Literal["pending", "running", "complete", "failed", "stale"] = "pending"
+    brief_revision: int = 0
+    variants: list[dict] = []
+    tokens_used: int = 0
+    model_used: str = ""
+    time_seconds: float = 0.0
+    error: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class StartAsyncRequest(BaseModel):
+    """Optional body to /generate-async; lets caller override the persisted
+    selection without saving it first (matches existing /generate behaviour)."""
+    selection: Optional[UnifiedCampaignSelection] = None
+
+
+class StartAsyncResponse(BaseModel):
+    job_id: str
+    total_tasks: int
+    brief_revision: int = 0
+
+
+class JobStateResponse(BaseModel):
+    status: str                       # campaign.status
+    job: Optional[JobState] = None
+
+
+class GenerationsListResponse(BaseModel):
+    rows: list[GenerationRow] = []
+    next_since: int = -1              # highest idx returned; client should pass this back
+
+
+class SteerRequest(BaseModel):
+    structured: StructuredCampaign
+    scope: Literal["remaining", "all"] = "remaining"
+
+
+class SteerResponse(BaseModel):
+    brief_revision: int
+    completed_marked_stale: int = 0
+
+
+class RegenStaleResponse(BaseModel):
+    flipped: int                      # how many rows went stale -> pending
+    worker_restarted: bool
+
+
 # ── Campaign Ideation (v2.7) ──────────────────────────
 # Upstream tool that produces a 10-item shortlist of campaign concepts from a
 # free-text theme + critique chat, grounded in past static creative trained
