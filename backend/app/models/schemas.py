@@ -468,6 +468,8 @@ class UnifiedCampaign(BaseModel):
     id: str
     user_id: str = ""
     user_email: str = ""
+    campaign_id: Optional[str] = None          # v2.9 — 5-char human-visible id
+    ideation_id: Optional[str] = None          # v2.9 — set when promoted from an ideation
     status: Literal["draft", "locked", "archived"] = "draft"
     raw_brief: str = ""
     reference_urls: list[str] = []
@@ -635,9 +637,24 @@ class CreativePackUploadResponse(BaseModel):
 # v2.7 ideations on phase ∈ {critique, shortlist}.
 
 class IdeationDiscount(BaseModel):
-    """Structured discount field on the Step-1 brief."""
+    """Structured discount field on the Step-1 brief.
+
+    v2.9 — `notes` is the human-readable rephrasing produced by the discount
+    resolver (e.g. "Rs.3000 off + complimentary spa credit"). Used in the
+    brief composer + Final 10 exports."""
     kind: Literal["percent_off", "flat_amount", "bogo", "free_upgrade", "no_discount"] = "no_discount"
     value: str = ""                            # free-text value when kind needs it
+    notes: str = ""                            # v2.9 — canonical, human-readable rephrasing
+
+
+class ResolveDiscountRequest(BaseModel):
+    phrase: str
+
+
+class ResolveDiscountResponse(BaseModel):
+    kind: Literal["percent_off", "flat_amount", "bogo", "free_upgrade", "no_discount"] = "no_discount"
+    value: str = ""
+    notes: str = ""
 
 
 class IdeationHotelsResolution(BaseModel):
@@ -687,6 +704,7 @@ class IdeationStartV2Request(BaseModel):
 
 class IdeationStartV2Response(BaseModel):
     ideation_id: str
+    campaign_id: Optional[str] = None          # v2.9 — 5-char human-visible id
 
 
 class IdeationVisualCue(BaseModel):
@@ -727,7 +745,8 @@ class IdeationRefineRequest(BaseModel):
 class IdeationFinalConcept(BaseModel):
     id: str                                    # stable across the final batch
     name: str
-    justification: str
+    justification: str                         # one-line subhead
+    story_line: str = ""                       # v2.9 — 2–3 sentence narrative; used in card expand + exports
     visual_cue: IdeationVisualCue
     inspiration_asset_ids: list[str] = []      # reserved for Phase-3 moodboard
 
@@ -759,11 +778,12 @@ class IdeationIterationRecord(BaseModel):
 
 
 class IdeationStateV2(BaseModel):
-    """Full state document for a v2.8 ideation. Loaded by GET /ideation/{id}."""
+    """Full state document for a v2.8/v2.9 ideation. Loaded by GET /ideation/{id}."""
     id: str
     user_id: str = ""
     user_email: str = ""
-    schema_version: int = 2                    # 1 = legacy v2.7, 2 = v2.8
+    schema_version: int = 2                    # 1 = legacy v2.7, 2 = v2.8/2.9
+    campaign_id: Optional[str] = None          # v2.9 — 5-char human-visible id
     phase: Literal["inputs", "directions", "refining", "final", "chosen", "archived"] = "inputs"
     inputs: Optional[IdeationInputs] = None
     selection: Optional[PropertySelection] = None
@@ -771,5 +791,30 @@ class IdeationStateV2(BaseModel):
     chosen_final_index: Optional[int] = None
     linked_campaign_id: Optional[str] = None
     app_version: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+# ── v2.9 Past Briefs + Ideated Campaigns landing rows ──────────────
+
+class PastBrief(BaseModel):
+    """One row on the Unified Campaign landing page (Past Briefs section)."""
+    id: str                                    # Firestore doc id
+    campaign_id: Optional[str] = None          # 5-char human id (may be empty for legacy docs)
+    campaign_name: str = ""                    # from structured.campaign_name
+    status: str = "draft"                      # draft | locked | archived
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    locked_at: Optional[str] = None
+
+
+class IdeatedCampaignRow(BaseModel):
+    """One row on the Unified Campaign landing page (Ideated Campaigns section)."""
+    id: str                                    # Firestore doc id of the ideation
+    campaign_id: Optional[str] = None
+    offer_name: str = ""
+    phase: str = "inputs"
+    is_loyalty: bool = False
+    hotel_count: int = 0
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

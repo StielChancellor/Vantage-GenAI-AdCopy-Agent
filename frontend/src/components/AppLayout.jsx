@@ -37,23 +37,26 @@ export default function AppLayout() {
             <Home size={18} />
             <span>Home</span>
           </NavLink>
+
+          <div className="em-mono-label sidebar-section-label">Agents</div>
           <NavLink to="/ideation" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Sparkles size={18} />
             <span>Campaign Ideation</span>
           </NavLink>
           <NavLink to="/unified" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Zap size={18} />
-            <span>Unified Campaign</span>
+            <span>Unified Campaign Copy</span>
           </NavLink>
           <NavLink to="/adcopy" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Megaphone size={18} />
-            <span>Ad Copy</span>
+            <span>Media Ad Copy</span>
           </NavLink>
           <NavLink to="/crm" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
             <Mail size={18} />
-            <span>CRM</span>
+            <span>CRM Copy</span>
           </NavLink>
-          <NavLink to="/calendar" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
+
+          <NavLink to="/calendar" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`} style={{ marginTop: 14 }}>
             <Calendar size={18} />
             <span>Marketing Calendar</span>
           </NavLink>

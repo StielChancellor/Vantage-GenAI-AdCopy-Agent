@@ -19,18 +19,18 @@ import { useSelection } from '../contexts/SelectionContext';
 import IntelligentPropertyPicker from '../components/IntelligentPropertyPicker';
 
 const TOOLS = [
-  { id: 'adcopy',  num: '01 / Tool', icon: Megaphone, title: 'Ad Copy',
+  { id: 'ideation', num: '01 / Agent', icon: Zap, title: 'Campaign Ideation',
+    blurb: 'Brief in. Concepts out. Iterate with a creative-director agent until you have ten polished names.',
+    chip: 'Start here', to: '/ideation', featured: true },
+  { id: 'unified', num: '02 / Agent', icon: Zap, title: 'Unified Campaign Copy',
+    blurb: 'Take a chosen concept end-to-end: ads + CRM, fanned out across the chain.',
+    chip: 'Brief → fan-out', to: '/unified' },
+  { id: 'adcopy',  num: '03 / Agent', icon: Megaphone, title: 'Media Ad Copy',
     blurb: 'Headlines & descriptions across Google, Meta, YouTube — six platforms in one generation.',
     chip: '28 variants typical', to: '/adcopy' },
-  { id: 'crm',     num: '02 / Tool', icon: Mail, title: 'CRM Campaign',
+  { id: 'crm',     num: '04 / Agent', icon: Mail, title: 'CRM Copy',
     blurb: 'WhatsApp, Email, App Push — promotional, lifecycle, transactional in one calendar.',
-    chip: 'multi-channel ready', to: '/crm' },
-  { id: 'calendar',num: '03 / Tool', icon: Calendar, title: 'Marketing Calendar',
-    blurb: 'See ads & CRM across the quarter. Auto-pull past performance & seasonality.',
-    chip: 'Q view ready', to: '/calendar' },
-  { id: 'unified', num: '04 / Tool', icon: Zap, title: 'Unified Campaign',
-    blurb: 'One brief, fanned out: ads & CRM together, sequenced. Choose channels later.',
-    chip: 'New', to: '/unified', featured: true },
+    chip: 'multi-channel', to: '/crm' },
 ];
 
 export default function Hub() {
@@ -221,11 +221,11 @@ export default function Hub() {
         </div>
       )}
 
-      {/* Tools grid */}
+      {/* Agents grid */}
       <div className="em-section-head">
         <div style={{ display: 'flex', alignItems: 'baseline' }}>
-          <h3 className="em-display">Tools</h3>
-          <span className="lead">Each one inherits identity, brand voice, and guardrails.</span>
+          <h3 className="em-display">Agents</h3>
+          <span className="lead">Each agent inherits identity, brand voice, and guardrails. One feeds the next.</span>
         </div>
       </div>
       <div className="em-tools">

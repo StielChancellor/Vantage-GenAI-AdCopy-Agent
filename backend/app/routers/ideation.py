@@ -35,13 +35,22 @@ from backend.app.models.schemas import (
     IdeationVisualCue, IdeationRefineRequest,
     IdeationFinalConcept, IdeationFinalizeRequest, IdeationFinalResponse,
     IdeationStateV2, IdeationIterationRecord,
+    # v2.9
+    ResolveDiscountRequest, ResolveDiscountResponse,
 )
 from backend.app.services.ideation.critique_engine import next_critique_turn
 from backend.app.services.ideation.shortlist_generator import generate_shortlist
 from backend.app.services.ideation.hotels_resolver import resolve_hotels as _resolve_hotels
+from backend.app.services.ideation.discount_resolver import resolve_discount as _resolve_discount
 from backend.app.services.ideation.direction_generator import generate_directions as _generate_directions
 from backend.app.services.ideation.finalizer import generate_final_concepts as _generate_final_concepts
+from backend.app.services.ideation.campaign_id import (
+    generate_campaign_id, ensure_campaign_id,
+)
+from backend.app.services.ideation import exporters as _exporters
 from backend.app.services.rag_engine import retrieve_visual_inspiration
+
+from fastapi.responses import Response, JSONResponse
 
 logger = logging.getLogger("vantage.ideation")
 router = APIRouter(prefix="/ideation", tags=["Ideation"])
@@ -247,6 +256,7 @@ async def start_ideation(
     _enforce_selection_access(selection, current_user)
 
     cid = uuid.uuid4().hex[:16]
+    campaign_id = generate_campaign_id()      # v2.9 — 5-char human-visible id
     inputs_dict = body.inputs.model_dump() if hasattr(body.inputs, "model_dump") else body.inputs.dict()
     sel_dict = selection.model_dump() if hasattr(selection, "model_dump") else selection.dict()
 
@@ -255,6 +265,7 @@ async def start_ideation(
         "user_id": current_user.get("uid", ""),
         "user_email": current_user.get("sub", ""),
         "schema_version": 2,
+        "campaign_id": campaign_id,
         "phase": "inputs",
         "inputs": inputs_dict,
         "selection": sel_dict,
@@ -268,6 +279,7 @@ async def start_ideation(
 
     _audit_safe("ideation_start_v2", current_user, {
         "ideation_id": cid,
+        "campaign_id": campaign_id,
         "offer_name": (body.inputs.offer_name or "")[:120],
         "audience_axis": body.inputs.audience_axis,
         "tone_axis": body.inputs.tone_axis,
@@ -275,7 +287,7 @@ async def start_ideation(
         "hotel_count": len(body.inputs.hotels_resolution.resolved_hotel_ids or []),
     })
 
-    return IdeationStartV2Response(ideation_id=cid)
+    return IdeationStartV2Response(ideation_id=cid, campaign_id=campaign_id)
 
 
 @router.post("/resolve-hotels", response_model=ResolveHotelsResponse)
@@ -300,6 +312,18 @@ async def resolve_hotels_route(
         is_loyalty=bool(resolved.get("is_loyalty")),
         notes=resolved.get("notes", ""),
     )
+
+
+@router.post("/resolve-discount", response_model=ResolveDiscountResponse)
+async def resolve_discount_route(
+    body: ResolveDiscountRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """v2.9 — normalise a free-text discount phrase into the structured
+    {kind, value, notes} shape used by IdeationDiscount. Called from the
+    Brief form's discount input."""
+    resolved = await _resolve_discount((body.phrase or "").strip())
+    return ResolveDiscountResponse(**resolved)
 
 
 @router.post("/{ideation_id}/directions", response_model=IdeationDirectionsResponse)
@@ -781,10 +805,15 @@ async def choose_concept(
         )
         campaign_name = (item.get("name") or "").strip()[:60]
 
+    # v2.9 — carry the human-visible campaign_id from the ideation onto the
+    # promoted unified_campaigns doc. If the ideation has none (legacy), mint one.
+    inherited_campaign_id = data.get("campaign_id") or ensure_campaign_id(ref, data)
+
     cid = uuid.uuid4().hex[:16]
     db.collection(_CAMPAIGNS_COLL).document(cid).set({
         "user_id": current_user.get("uid", ""),
         "user_email": current_user.get("sub", ""),
+        "campaign_id": inherited_campaign_id,
         "status": "draft",
         "raw_brief": raw_brief,
         "reference_urls": [],
@@ -874,36 +903,121 @@ def _doc_to_payload(doc) -> dict:
     return {"id": doc.id, **data}
 
 
+_IN_PROGRESS_PHASES = {"inputs", "directions", "refining", "final", "critique", "shortlist"}
+
+
 @router.get("/{ideation_id}")
 async def get_ideation(
     ideation_id: str,
     current_user: dict = Depends(get_current_user),
 ):
     db = get_firestore()
-    d = db.collection(_COLL).document(ideation_id).get()
+    ref = db.collection(_COLL).document(ideation_id)
+    d = ref.get()
     if not d.exists:
         raise HTTPException(404, "Ideation not found.")
-    _require_owner_or_admin(d.to_dict() or {}, current_user)
-    return _doc_to_payload(d)
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    # v2.9 — lazy-backfill campaign_id on legacy docs.
+    if not data.get("campaign_id"):
+        cid = ensure_campaign_id(ref, data)
+        data["campaign_id"] = cid
+    return {"id": d.id, **data}
 
 
 @router.get("")
 async def list_ideations(
     limit: int = 30,
+    status: str = "",
     current_user: dict = Depends(get_current_user),
 ):
+    """List ideations, newest first. v2.9 adds the `status=in_progress`
+    filter — used by the Unified Campaign landing page to surface
+    ideations not yet promoted to a campaign."""
     db = get_firestore()
     coll = db.collection(_COLL)
     if current_user.get("role") != "admin":
         coll = coll.where("user_id", "==", current_user.get("uid", ""))
     try:
-        stream = coll.order_by("updated_at", direction="DESCENDING").limit(limit).stream()
+        stream = coll.order_by("updated_at", direction="DESCENDING").limit(limit * 2).stream()
         docs = list(stream)
     except Exception:
         docs = list(coll.limit(max(limit * 3, 30)).stream())
         docs.sort(key=lambda d: (d.to_dict() or {}).get("updated_at", ""), reverse=True)
-        docs = docs[:limit]
-    return [_doc_to_payload(d) for d in docs]
+
+    if status == "in_progress":
+        docs = [d for d in docs if (d.to_dict() or {}).get("phase") in _IN_PROGRESS_PHASES]
+
+    return [_doc_to_payload(d) for d in docs[:limit]]
+
+
+@router.get("/{ideation_id}/export.csv")
+async def export_csv(
+    ideation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """v2.9 — CSV export of the Final 10. One row per concept; columns include
+    campaign_id, name, justification, story_line, palette, motifs, mood,
+    photography_style, logo_placement."""
+    db = get_firestore()
+    ref = db.collection(_COLL).document(ideation_id)
+    d = ref.get()
+    if not d.exists:
+        raise HTTPException(404, "Ideation not found.")
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    if not data.get("campaign_id"):
+        data["campaign_id"] = ensure_campaign_id(ref, data)
+    csv_text = _exporters.to_csv({"id": d.id, **data})
+    fname = f"campaign-{data.get('campaign_id') or ideation_id}.csv"
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.get("/{ideation_id}/export.html")
+async def export_html(
+    ideation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """v2.9 — Single-page printable HTML deck for the Final 10. Renders
+    palette swatches as coloured boxes; print to PDF via the browser."""
+    db = get_firestore()
+    ref = db.collection(_COLL).document(ideation_id)
+    d = ref.get()
+    if not d.exists:
+        raise HTTPException(404, "Ideation not found.")
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    if not data.get("campaign_id"):
+        data["campaign_id"] = ensure_campaign_id(ref, data)
+    html_text = _exporters.to_html({"id": d.id, **data})
+    return Response(content=html_text, media_type="text/html; charset=utf-8")
+
+
+@router.get("/{ideation_id}/export.json")
+async def export_json(
+    ideation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """v2.9 — Raw concepts blob with metadata, downloadable."""
+    db = get_firestore()
+    ref = db.collection(_COLL).document(ideation_id)
+    d = ref.get()
+    if not d.exists:
+        raise HTTPException(404, "Ideation not found.")
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    if not data.get("campaign_id"):
+        data["campaign_id"] = ensure_campaign_id(ref, data)
+    payload = _exporters.to_json({"id": d.id, **data})
+    fname = f"campaign-{data.get('campaign_id') or ideation_id}.json"
+    return JSONResponse(
+        content=payload,
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 @router.post("/{ideation_id}/archive")

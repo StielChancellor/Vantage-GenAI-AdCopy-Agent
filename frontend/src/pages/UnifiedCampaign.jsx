@@ -15,16 +15,23 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  Zap, ChevronLeft, ChevronRight, Lock, Unlock, Search, X, Download, Sparkles,
+  Zap, ChevronLeft, ChevronRight, Lock, Unlock, Search, X, Download, Sparkles, Plus, ArrowRight,
 } from 'lucide-react';
 import {
   createCampaign, getCampaign, patchCampaign, lockCampaign, unlockCampaign,
-  generateCampaign, searchEvents,
+  generateCampaign, searchEvents, listPastBriefs, listIdeations,
 } from '../services/api';
 import IntelligentPropertyPicker from '../components/IntelligentPropertyPicker';
 import EventCalendar from '../components/EventCalendar';
 import GenerationProgress from '../components/GenerationProgress';
 import { useSelection } from '../contexts/SelectionContext';
+
+function formatDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch { return ''; }
+}
 
 const STEPS = [
   { num: 1, label: 'Brief' },
@@ -84,7 +91,41 @@ export default function UnifiedCampaign() {
   const [results, setResults] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // v2.9 — landing view state (only used when no ?campaign= in URL).
+  const [showLanding, setShowLanding] = useState(false);
+  const [pastBriefs, setPastBriefs] = useState([]);
+  const [ideatedCampaigns, setIdeatedCampaigns] = useState([]);
+  const [loadingLanding, setLoadingLanding] = useState(false);
+
   const isLocked = campaign?.status === 'locked';
+  // v2.9 — when the campaign was promoted from an Ideation, skip the Brief step.
+  const fromIdeation = !!campaign?.ideation_id;
+  const visibleSteps = useMemo(() => (
+    fromIdeation ? STEPS.filter((s) => s.num !== 1) : STEPS
+  ), [fromIdeation]);
+
+  // v2.9 — load the landing view when the user opens /unified with no query.
+  useEffect(() => {
+    if (queryId) { setShowLanding(false); return; }
+    setShowLanding(true);
+    setLoadingLanding(true);
+    (async () => {
+      try {
+        const [pb, idc] = await Promise.all([
+          listPastBriefs(5).catch(() => ({ data: [] })),
+          listIdeations(20, { status: 'in_progress' }).catch(() => ({ data: [] })),
+        ]);
+        setPastBriefs(pb.data || []);
+        setIdeatedCampaigns(idc.data || []);
+      } finally {
+        setLoadingLanding(false);
+      }
+    })();
+  }, [queryId]);
+
+  const startNewCampaign = () => { setShowLanding(false); setStep(1); };
+  const openPastBrief = (id) => navigate(`/unified?campaign=${encodeURIComponent(id)}`);
+  const resumeIdeation = (id) => navigate(`/ideation?id=${encodeURIComponent(id)}`);
 
   // Hydrate if we landed from /unified?campaign=<id> (edit-from-MyAccount path).
   useEffect(() => {
@@ -304,7 +345,10 @@ export default function UnifiedCampaign() {
   return (
     <div className="em-scope" style={{ padding: '8px 4px 32px' }}>
       <div className="page-header">
-        <h1>Unified <em style={{ color: 'var(--em-accent)' }}>Campaign</em></h1>
+        <h1>Unified <em style={{ color: 'var(--em-accent)' }}>Campaign Copy</em></h1>
+        {campaign?.campaign_id && (
+          <span className="id-chip" style={{ marginLeft: 12 }} title="Campaign ID">#{campaign.campaign_id}</span>
+        )}
         {campaign && (
           <span className={`em-pill ${isLocked ? 'accent' : 'muted'}`} style={{ marginLeft: 12 }}>
             {isLocked ? <><Lock size={11} style={{ marginRight: 4, verticalAlign: '-1px' }} /> Locked</> : <><Unlock size={11} style={{ marginRight: 4, verticalAlign: '-1px' }} /> Draft</>}
@@ -312,8 +356,79 @@ export default function UnifiedCampaign() {
         )}
       </div>
 
+      {showLanding && (
+        <section style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="btn btn-primary" onClick={startNewCampaign}>
+              <Plus size={16} /> New campaign
+            </button>
+          </div>
+
+          <section>
+            <h3 className="em-display" style={{ marginBottom: 8 }}>Past briefs</h3>
+            <p style={{ color: 'var(--em-ink-soft)', marginTop: 0, fontSize: 13 }}>
+              Your last five locked campaigns. Open one to review or generate again.
+            </p>
+            {loadingLanding && <p className="muted">Loading…</p>}
+            {!loadingLanding && pastBriefs.length === 0 && (
+              <p className="muted">No locked campaigns yet — finalise a brief to see it here.</p>
+            )}
+            {pastBriefs.map((b) => (
+              <button
+                key={b.id}
+                className="past-brief-row"
+                onClick={() => openPastBrief(b.id)}
+                type="button"
+              >
+                <span className="id-chip">#{b.campaign_id || '·····'}</span>
+                <span className="row-title">{b.campaign_name || 'Untitled brief'}</span>
+                <span className="em-pill accent">{b.status}</span>
+                <span className="row-date">{formatDate(b.locked_at || b.updated_at || b.created_at)}</span>
+                <ArrowRight size={14} className="row-arrow" />
+              </button>
+            ))}
+          </section>
+
+          <section>
+            <h3 className="em-display" style={{ marginBottom: 8 }}>Ideated campaigns</h3>
+            <p style={{ color: 'var(--em-ink-soft)', marginTop: 0, fontSize: 13 }}>
+              Brainstorming sessions in progress. Resume any time — every iteration is preserved.
+            </p>
+            {loadingLanding && <p className="muted">Loading…</p>}
+            {!loadingLanding && ideatedCampaigns.length === 0 && (
+              <p className="muted">No in-progress ideations yet — start one from Campaign Ideation.</p>
+            )}
+            {ideatedCampaigns.map((it) => {
+              const offer = it.inputs?.offer_name || it.theme_text || 'Untitled idea';
+              const phase = it.phase || 'inputs';
+              const hr = it.inputs?.hotels_resolution || {};
+              const hotelCount = (hr.resolved_hotel_ids || []).length;
+              return (
+                <button
+                  key={it.id}
+                  className="past-brief-row"
+                  onClick={() => resumeIdeation(it.id)}
+                  type="button"
+                >
+                  <span className="id-chip">#{it.campaign_id || '·····'}</span>
+                  <span className="row-title">{offer}</span>
+                  <span className="em-pill muted">{phase}</span>
+                  <span className="row-date">
+                    {hotelCount > 0 ? `${hotelCount} hotels · ` : ''}
+                    {formatDate(it.updated_at || it.created_at)}
+                  </span>
+                  <ArrowRight size={14} className="row-arrow" />
+                </button>
+              );
+            })}
+          </section>
+        </section>
+      )}
+
+      {!showLanding && (
+      <>
       <div className="wizard-steps" style={{ marginTop: 12 }}>
-        {STEPS.map((s) => (
+        {visibleSteps.map((s) => (
           <div key={s.num} className={`wizard-step ${step === s.num ? 'active' : ''} ${step > s.num ? 'completed' : ''}`}>
             <div className="wizard-step-circle">{s.num}</div>
             <span className="wizard-step-label">{s.label}</span>
@@ -634,6 +749,8 @@ export default function UnifiedCampaign() {
           </section>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

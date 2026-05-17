@@ -135,10 +135,12 @@ export const getCampaign = (id) => api.get(`/campaigns/${encodeURIComponent(id)}
 export const patchCampaign = (id, data) => api.patch(`/campaigns/${encodeURIComponent(id)}`, data);
 export const generateCampaign = (id, data) => api.post(`/campaigns/${encodeURIComponent(id)}/generate`, data, { timeout: 600000 });
 
-// Campaign Ideation v2.8 — Form → Directions → Final 10 → Handoff
+// Campaign Ideation v2.8/v2.9 — Form → Directions → Final 10 → Handoff
 export const startIdeation = (inputs) => api.post('/ideation/start', { inputs });
 export const resolveHotels = (phrase) =>
   api.post('/ideation/resolve-hotels', { phrase }, { timeout: 90000 });
+export const resolveDiscount = (phrase) =>
+  api.post('/ideation/resolve-discount', { phrase }, { timeout: 60000 });
 export const generateDirections = (id) =>
   api.post(`/ideation/${encodeURIComponent(id)}/directions`, {}, { timeout: 600000 });
 export const refineIdeation = (id, body) =>
@@ -148,9 +150,19 @@ export const finalizeIdeation = (id, body = {}) =>
 export const chooseShortlist = (id, index) =>
   api.post(`/ideation/${encodeURIComponent(id)}/choose`, { index });
 export const getIdeation = (id) => api.get(`/ideation/${encodeURIComponent(id)}`);
-export const listIdeations = (limit = 30) => api.get(`/ideation?limit=${limit}`);
+export const listIdeations = (limit = 30, opts = {}) => {
+  const q = new URLSearchParams();
+  q.append('limit', String(limit));
+  if (opts.status) q.append('status', opts.status);
+  return api.get(`/ideation?${q.toString()}`);
+};
 export const archiveIdeation = (id) =>
-  api.post(`/ideation/${encodeURIComponent(id)}/archive`);
+  api.post(`/ideation/${encodeURIComponent(id)}/archive`, {});
+export const exportIdeationUrl = (id, format = 'csv') =>
+  `${API_BASE}/ideation/${encodeURIComponent(id)}/export.${format}`;
+// v2.9 — Past Briefs endpoint
+export const listPastBriefs = (limit = 5) =>
+  api.get(`/campaigns/past-briefs?limit=${limit}`);
 
 // Legacy v2.7 client (still used to resume in-progress chat-coach ideations).
 export const answerIdeation = (id, answerText) =>

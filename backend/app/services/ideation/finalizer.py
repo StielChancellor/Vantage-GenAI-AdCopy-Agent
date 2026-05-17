@@ -21,6 +21,7 @@ _SYSTEM_PROMPT = """You are the creative director compressing a week of divergen
 REQUIREMENTS PER CONCEPT
 - name             — ≤ 8 words, ownable, evocative. Not generic ("Summer Sale", "Festive Offer" are banned).
 - justification    — ONE crisp line (≤ 18 words) explaining why the name works for this brief.
+- story_line       — a 2–3 sentence narrative the creative team can run with. Names the audience, the central ritual or moment, and the emotional payoff. ≤ 80 words. NO marketing platitudes ("unforgettable", "experience like no other").
 - visual_cue       — concrete, prompt-ready:
     - palette: 3–5 tokens. Use evocative names AND hex codes when you can ("#D8E2DC mist").
     - motifs: 3–5 short phrases.
@@ -42,6 +43,7 @@ OUTPUT — return ONLY valid JSON in exactly this schema:
       "id": "c_slug",
       "name": "...",
       "justification": "...",
+      "story_line": "...",
       "visual_cue": {
         "palette": ["..."],
         "motifs": ["..."],
@@ -137,6 +139,7 @@ async def generate_final_concepts(
             "id": _clean_id(c.get("id"), prefix=f"f{len(cleaned)+1}"),
             "name": name[:80],
             "justification": _clip(c.get("justification"), 220),
+            "story_line": _clip(c.get("story_line"), 600),
             "visual_cue": cleaned_vc,
             "inspiration_asset_ids": [str(x)[:64] for x in (c.get("inspiration_asset_ids") or [])][:5],
         })
@@ -310,6 +313,7 @@ def _filler_concept(i: int) -> dict:
         "id": f"f_filler_{i}",
         "name": f"Concept {i} (filler)",
         "justification": "Filler — model returned fewer than 10 concepts. Regenerate to replace.",
+        "story_line": "",
         "visual_cue": {
             "palette": ["ivory", "linen", "ochre"],
             "motifs": ["candid moment", "negative space", "natural light"],

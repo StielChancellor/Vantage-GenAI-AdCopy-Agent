@@ -19,9 +19,13 @@ from backend.app.models.schemas import (
     UnifiedCampaignBrief, UnifiedCampaign, StructuredCampaign,
     UnifiedCampaignSelection, CampaignPatchRequest,
     CampaignGenerateRequest, CampaignGenerateResponse,
+    PastBrief,
 )
 from backend.app.services.campaigns.structurer import structure_brief
 from backend.app.services.campaigns.orchestrator import run_campaign
+from backend.app.services.ideation.campaign_id import (
+    generate_campaign_id, ensure_campaign_id,
+)
 
 logger = logging.getLogger("vantage.campaigns")
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
@@ -39,6 +43,8 @@ def _doc_to_campaign(doc) -> UnifiedCampaign:
         id=doc.id,
         user_id=data.get("user_id", ""),
         user_email=data.get("user_email", ""),
+        campaign_id=data.get("campaign_id"),
+        ideation_id=data.get("ideation_id"),
         status=data.get("status", "draft"),
         raw_brief=data.get("raw_brief", ""),
         reference_urls=list(data.get("reference_urls") or []),
@@ -76,13 +82,15 @@ async def structure_only(body: UnifiedCampaignBrief, _user=Depends(get_current_u
 
 @router.post("", response_model=UnifiedCampaign)
 async def create_campaign(body: UnifiedCampaignBrief, current_user: dict = Depends(get_current_user)):
-    """Step-1 → step-2: structure the brief and persist as a draft."""
+    """Step-1 → step-2: structure the brief and persist as a draft.
+    v2.9 — mints a 5-char human-visible campaign_id."""
     structured_data = await structure_brief(body.raw_brief, body.reference_urls)
     db = get_firestore()
     cid = uuid.uuid4().hex[:16]
     payload = {
         "user_id": current_user.get("uid", ""),
         "user_email": current_user.get("sub", ""),
+        "campaign_id": generate_campaign_id(),
         "status": "draft",
         "raw_brief": body.raw_brief,
         "reference_urls": list(body.reference_urls or []),
@@ -122,13 +130,57 @@ async def list_campaigns(
     return [_doc_to_campaign(d) for d in docs]
 
 
+@router.get("/past-briefs", response_model=list[PastBrief])
+async def list_past_briefs(
+    limit: int = 5,
+    current_user: dict = Depends(get_current_user),
+):
+    """v2.9 — last N locked campaigns for the current user.
+    Surfaced on the Unified Campaign landing page's "Past Briefs" section."""
+    db = get_firestore()
+    coll = db.collection(_COLL).where("status", "==", "locked")
+    if current_user.get("role") != "admin":
+        coll = coll.where("user_id", "==", current_user.get("uid", ""))
+    try:
+        stream = coll.order_by("locked_at", direction="DESCENDING").limit(limit).stream()
+        docs = list(stream)
+    except Exception:
+        docs = list(coll.limit(max(limit * 3, 30)).stream())
+        docs.sort(
+            key=lambda d: ((d.to_dict() or {}).get("locked_at") or (d.to_dict() or {}).get("updated_at") or ""),
+            reverse=True,
+        )
+        docs = docs[:limit]
+
+    out: list[PastBrief] = []
+    for d in docs:
+        data = d.to_dict() or {}
+        structured = data.get("structured") or {}
+        out.append(PastBrief(
+            id=d.id,
+            campaign_id=data.get("campaign_id"),
+            campaign_name=(structured.get("campaign_name") or "")[:120],
+            status=data.get("status", "draft"),
+            created_at=data.get("created_at"),
+            updated_at=data.get("updated_at"),
+            locked_at=data.get("locked_at"),
+        ))
+    return out
+
+
 @router.get("/{campaign_id}", response_model=UnifiedCampaign)
 async def get_campaign(campaign_id: str, current_user: dict = Depends(get_current_user)):
     db = get_firestore()
-    d = db.collection(_COLL).document(campaign_id).get()
+    ref = db.collection(_COLL).document(campaign_id)
+    d = ref.get()
     if not d.exists:
         raise HTTPException(404, "Campaign not found.")
-    _require_owner_or_admin(d.to_dict() or {}, current_user)
+    data = d.to_dict() or {}
+    _require_owner_or_admin(data, current_user)
+    # v2.9 — lazy-backfill campaign_id on legacy docs.
+    if not data.get("campaign_id"):
+        ensure_campaign_id(ref, data)
+        d = ref.get()
     return _doc_to_campaign(d)
 
 
