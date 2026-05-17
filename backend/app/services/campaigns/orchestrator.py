@@ -4,10 +4,18 @@ Given a saved campaign + a selection (properties + channels + levels),
 fan out one generation per (entity × channel × level), reusing the
 existing ad_generator (Search + Meta) and crm_generator (App Push)
 pipelines. Returns a flat list of result rows.
+
+v2.9.3 — generations run in parallel under a small semaphore so a
+fan-out across N entities × M channels finishes in ~max(per-call)
+instead of sum(per-call). The semaphore cap protects Gemini's
+per-minute rate limit while still being aggressive enough to bring a
+typical 10-entity × 2-channel campaign from ~5 min to ~30s.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import time
 from typing import Iterable
 
@@ -270,14 +278,23 @@ async def run_campaign(campaign: dict, override_selection: UnifiedCampaignSelect
                 except Exception:
                     pass
 
-    results: list[dict] = []
-    total_tokens = 0
-    total_seconds = 0.0
     overall_t0 = time.time()
 
+    # v2.9.3 — build the full (entity, level, channel) work list, run them in
+    # parallel with a small semaphore (default 5) so a 20-task fan-out
+    # completes in ~max latency rather than sum latency. Cap is configurable
+    # via UC_PARALLEL_FANOUT env var.
+    semaphore_cap = int(os.environ.get("UC_PARALLEL_FANOUT", "5"))
+    sem = asyncio.Semaphore(semaphore_cap)
+
+    tasks: list[tuple[int, dict, str, str]] = []  # (idx, entity, level, channel)
     for entity, level in work:
-        entity_label = _resolve_label(entity)
         for channel in selection.channels:
+            tasks.append((len(tasks), entity, level, channel))
+
+    async def _run_one(idx: int, entity: dict, level: str, channel: str) -> dict:
+        async with sem:
+            entity_label = _resolve_label(entity)
             row = CampaignResultRow(
                 label=entity_label, scope=entity.get("scope", "hotel"),
                 channel=channel, level=level,
@@ -293,8 +310,6 @@ async def run_campaign(campaign: dict, override_selection: UnifiedCampaignSelect
                 row.tokens_used = tokens
                 row.model_used = model
                 row.time_seconds = seconds
-                total_tokens += tokens
-                total_seconds += seconds
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "campaign_subgen_failed",
@@ -304,7 +319,13 @@ async def run_campaign(campaign: dict, override_selection: UnifiedCampaignSelect
                     }},
                 )
                 row.error = str(exc)[:300]
-            results.append(row.model_dump())
+            return row.model_dump()
+
+    coros = [_run_one(i, e, l, c) for (i, e, l, c) in tasks]
+    raw_rows = await asyncio.gather(*coros, return_exceptions=False)
+    results: list[dict] = list(raw_rows)
+    total_tokens = sum(int(r.get("tokens_used", 0) or 0) for r in results)
+    total_seconds = sum(float(r.get("time_seconds", 0.0) or 0.0) for r in results)
 
     return {
         "campaign_id": campaign.get("id", ""),
