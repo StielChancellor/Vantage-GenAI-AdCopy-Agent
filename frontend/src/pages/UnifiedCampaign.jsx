@@ -480,6 +480,33 @@ export default function UnifiedCampaign() {
     return c;
   }, [streamArray]);
 
+  // v3.0.1 — aggregate per-row tokens + seconds + INR cost so the header
+  // reflects spend in real time. Pricing matches core/vertex_client.MODEL_PRICING
+  // ($ per 1M tokens; without per-row input/output split we approximate
+  // a 70:30 input:output blend).
+  const MODEL_BLENDED_USD_PER_M = {
+    'gemini-3.1-pro-preview': 0.7 * 3.50 + 0.3 * 14.00,
+    'gemini-2.5-pro':          0.7 * 1.25 + 0.3 * 10.00,
+    'gemini-2.5-flash':        0.7 * 0.15 + 0.3 * 0.60,
+    'gemini-2.5-flash-lite':   0.7 * 0.075 + 0.3 * 0.30,
+    'gemini-2.0-flash-lite':   0.7 * 0.075 + 0.3 * 0.30,
+    'claude-opus-4-7':         0.7 * 15.00 + 0.3 * 75.00,
+  };
+  const USD_TO_INR = 85;
+  const totals = useMemo(() => {
+    let tokens = 0, seconds = 0, costUSD = 0;
+    streamArray.forEach((r) => {
+      if (r.status !== 'complete') return;
+      const t = Number(r.tokens_used || 0);
+      tokens += t;
+      seconds += Number(r.time_seconds || 0);
+      const m = r.model_used || 'gemini-3.1-pro-preview';
+      const rate = MODEL_BLENDED_USD_PER_M[m] ?? MODEL_BLENDED_USD_PER_M['gemini-3.1-pro-preview'];
+      costUSD += (t / 1_000_000) * rate;
+    });
+    return { tokens, seconds, costINR: costUSD * USD_TO_INR };
+  }, [streamArray]);
+
   const downloadCsv = () => {
     const rows = [['campaign', 'entity', 'scope', 'channel', 'level', 'idx', 'headline', 'description']];
     const cname = structured.campaign_name || campaign?.structured?.campaign_name || 'campaign';
@@ -884,6 +911,13 @@ export default function UnifiedCampaign() {
                       {jobState && (
                         <span style={{ color: 'var(--em-ink-soft)', marginLeft: 12, fontSize: 12, fontFamily: 'var(--em-mono, monospace)' }}>
                           rev {jobState.brief_revision || 0}
+                        </span>
+                      )}
+                      {totals.tokens > 0 && (
+                        <span style={{ color: 'var(--em-ink-soft)', marginLeft: 12, fontSize: 12, fontFamily: 'var(--em-mono, monospace)' }}>
+                          · {totals.tokens.toLocaleString()} tokens
+                          · ₹{totals.costINR.toFixed(2)}
+                          · {totals.seconds.toFixed(0)}s compute
                         </span>
                       )}
                     </div>
