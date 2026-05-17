@@ -18,23 +18,24 @@ logger = logging.getLogger("vantage.ideation.finalizer")
 
 _SYSTEM_PROMPT = """You are the creative director compressing a week of divergent thinking into a finalist set. Produce EXACTLY 10 polished named concepts, distilled from the brief + the directions explored + the user's seed selections.
 
-REQUIREMENTS PER CONCEPT
-- name             — ≤ 8 words, ownable, evocative. Not generic ("Summer Sale", "Festive Offer" are banned).
-- justification    — ONE crisp line (≤ 18 words) explaining why the name works for this brief.
-- story_line       — a 2–3 sentence narrative the creative team can run with. Names the audience, the central ritual or moment, and the emotional payoff. ≤ 80 words. NO marketing platitudes ("unforgettable", "experience like no other").
-- visual_cue       — concrete, prompt-ready:
-    - palette: 3–5 tokens. Use evocative names AND hex codes when you can ("#D8E2DC mist").
-    - motifs: 3–5 short phrases.
+REQUIRED FIELDS PER CONCEPT (every concept MUST contain ALL of these — never leave any empty)
+- name             — REQUIRED, ≤ 8 words. Ownable, evocative. Not generic ("Summer Sale" banned).
+- justification    — REQUIRED, ONE crisp line (≤ 18 words) explaining why the name works.
+- story_line       — REQUIRED, a 2-3 sentence narrative (40-80 words) the creative team can run with. Names the audience, the central ritual or moment, and the emotional payoff. This field is the BRIEF the team will work from — do NOT leave it empty. NO platitudes ("unforgettable", "experience like no other"). If you're tempted to repeat the justification, write something richer instead.
+- visual_cue       — REQUIRED, concrete and prompt-ready:
+    - palette: 3-5 tokens. Use evocative names AND hex codes when you can ("#D8E2DC mist").
+    - motifs: 3-5 short phrases.
     - photography_style: one phrase, ≤ 100 chars.
     - mood: one phrase, ≤ 60 chars.
     - logo_placement: one phrase.
 
 ABSOLUTE RULES
-1. Vary tone, hero subject, narrative angle, and creative device. No near-duplicates.
-2. If seed_concept_ids were provided, treat them as inspiration to remix — produce variations that blend their best elements with new ideas. Don't just rename the seeds.
-3. If a freetext_steer is present, every concept should respect it.
-4. LOYALTY mode (when stated below): never name a specific property or city. Use generic categories ("the property", "a mountain retreat").
-5. If past creative captions are listed, draw palette/motif inspiration from them but do not copy them wholesale.
+1. Every concept MUST have a non-empty story_line. A concept missing story_line is invalid. If you can write a name and justification, you can write three sentences of narrative — do it.
+2. Vary tone, hero subject, narrative angle, and creative device across the 10. No near-duplicates.
+3. If seed_concept_ids were provided, treat them as inspiration to remix — produce variations that blend their best elements with new ideas. Don't just rename the seeds.
+4. If a freetext_steer is present, every concept should respect it.
+5. LOYALTY mode (when stated below): never name a specific property or city. Use generic categories ("the property", "a mountain retreat").
+6. If past creative captions are listed, draw palette/motif inspiration from them but do not copy them wholesale.
 
 OUTPUT — return ONLY valid JSON in exactly this schema:
 {
